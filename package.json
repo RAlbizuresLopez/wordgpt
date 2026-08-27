@@ -1,0 +1,29 @@
+{
+  "name": "word-gpt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "dev": "concurrently -k \"pnpm run dev:web\" \"pnpm run dev:api\"",
+    "dev:web": "vite --host localhost",
+    "dev:api": "PORT=3001 node --watch server/index.js",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "certs": "office-addin-dev-certs install",
+    "validate:manifest": "office-addin-manifest validate manifest.xml",
+    "sideload": "office-addin-debugging start manifest.xml"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^1.2.0",
+    "concurrently": "^9.1.2",
+    "office-addin-debugging": "^5.1.6",
+    "office-addin-dev-certs": "^1.13.4",
+    "office-addin-manifest": "^1.13.4",
+    "vite": "^6.0.7"
+  }
+}

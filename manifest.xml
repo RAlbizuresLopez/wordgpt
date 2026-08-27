@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="TaskPaneApp">
+  <Id>ac5352f4-df9d-40eb-8942-9a31a9e338e1</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Word GPT Local</ProviderName>
+  <DefaultLocale>es-ES</DefaultLocale>
+  <DisplayName DefaultValue="Word GPT" />
+  <Description DefaultValue="Chat con IA que entiende y edita tu documento de Word." />
+  <IconUrl DefaultValue="https://macmini4pro.tail97c777.ts.net/icon.svg.png" />
+  <HighResolutionIconUrl DefaultValue="https://macmini4pro.tail97c777.ts.net/icon.svg.png" />
+  <SupportUrl DefaultValue="https://macmini4pro.tail97c777.ts.net" />
+  <Hosts><Host Name="Document" /></Hosts>
+  <Requirements><Sets DefaultMinVersion="1.3"><Set Name="WordApi" /></Sets></Requirements>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://macmini4pro.tail97c777.ts.net/taskpane.html" />
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>
