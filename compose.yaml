@@ -13,6 +13,8 @@ services:
       # Ollama continúa nativo en macOS para aprovechar Metal en el M4.
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       PORT: 3000
+      # Docker necesita una interfaz de contenedor; el puerto del Mac sigue limitado a 127.0.0.1.
+      BIND_HOST: 0.0.0.0
     ports:
       # Solo Tailscale Serve, que se ejecuta en el host, puede alcanzar este puerto.
       - "127.0.0.1:3000:3000"

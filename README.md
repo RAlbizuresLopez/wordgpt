@@ -32,7 +32,7 @@ pnpm start
 
 ### Servicio permanente con Docker
 
-En macOS, Ollama debe permanecer instalado **nativamente** para aprovechar la aceleración Metal del M4. Solo el gateway se ejecuta en Docker; se comunica con Ollama mediante `host.docker.internal` y publica el puerto únicamente en `127.0.0.1`.
+En macOS, Ollama debe permanecer instalado **nativamente** para aprovechar la aceleración Metal del M4. Solo el gateway se ejecuta en Docker; se comunica con Ollama mediante `host.docker.internal` y publica el puerto únicamente en `127.0.0.1`. Dentro del contenedor escucha en su interfaz interna; Docker no lo expone a la LAN.
 
 ```bash
 # Instala y abre Docker Desktop una vez; activa “Start Docker Desktop when you log in”.

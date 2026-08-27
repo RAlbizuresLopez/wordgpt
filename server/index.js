@@ -3,6 +3,7 @@ import express from "express";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const bindHost = process.env.BIND_HOST || "127.0.0.1";
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("dist"));
 
@@ -71,4 +72,4 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-app.listen(port, "127.0.0.1", () => console.log(`Gateway local listo en http://127.0.0.1:${port} (Ollama: ${ollamaModel})`));
+app.listen(port, bindHost, () => console.log(`Gateway local listo en http://${bindHost}:${port} (Ollama: ${ollamaModel})`));
