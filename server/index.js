@@ -13,6 +13,7 @@ const allowedTailscaleLogin = process.env.ALLOWED_TAILSCALE_USER_LOGIN?.toLowerC
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
 
 app.use("/api", (req, res, next) => {
+  if (req.path === "/health") return next();
   if (!allowedTailscaleLogin) return next();
   const requester = req.get("Tailscale-User-Login")?.toLowerCase();
   if (requester === allowedTailscaleLogin) return next();

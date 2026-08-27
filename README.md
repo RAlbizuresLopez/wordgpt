@@ -30,6 +30,24 @@ pnpm run build
 pnpm start
 ```
 
+### Servicio permanente con Docker
+
+En macOS, Ollama debe permanecer instalado **nativamente** para aprovechar la aceleración Metal del M4. Solo el gateway se ejecuta en Docker; se comunica con Ollama mediante `host.docker.internal` y publica el puerto únicamente en `127.0.0.1`.
+
+```bash
+# Instala y abre Docker Desktop una vez; activa “Start Docker Desktop when you log in”.
+docker compose up -d --build
+docker compose ps
+```
+
+El contenedor usa `restart: unless-stopped`: se recupera tras una caída y después de reiniciar Docker. Tailscale Serve sigue en el host y debe apuntar al puerto local del contenedor:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:3000
+```
+
+Para actualizarlo tras cambios del repositorio, ejecuta `docker compose up -d --build`. Consulta los registros con `docker compose logs -f` y detén el servicio con `docker compose down`.
+
 En otra terminal, valida e instala el manifiesto en Word:
 
 ```bash
