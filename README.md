@@ -65,7 +65,7 @@ Ejecuta el gateway únicamente en el Mac mini. Ollama continúa en `127.0.0.1:11
 tailscale serve --bg --https=443 http://127.0.0.1:3000
 ```
 
-Este proyecto está configurado para `https://macmini4pro.tail97c777.ts.net`. Define también `ALLOWED_TAILSCALE_USER_LOGIN` con el correo con que ella entra a Tailscale y crea una ACL que solo permita su identidad/dispositivo al Mac mini en el puerto 443. Así hay autorización doble: la red y el gateway. No uses `tailscale funnel`.
+Este proyecto está configurado para `https://macmini4pro.tail97c777.ts.net`. Define también `ALLOWED_TAILSCALE_USER_LOGINS` con los correos autorizados, separados por comas, y crea una ACL que solo permita esas identidades/dispositivos al Mac mini en el puerto 443. Así hay autorización doble: la red y el gateway. No uses `tailscale funnel`.
 
 El contenido se manda únicamente al Mac mini cuando se hace una consulta. Revisa las obligaciones de privacidad y consentimiento aplicables a los documentos clínicos; el modelo no debe producir diagnósticos ni decisiones de tratamiento.
 

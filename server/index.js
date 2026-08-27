@@ -9,14 +9,19 @@ app.use(express.static("dist"));
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "qwen3:14b";
 const contextLength = Number(process.env.OLLAMA_CONTEXT_LENGTH || 8192);
-const allowedTailscaleLogin = process.env.ALLOWED_TAILSCALE_USER_LOGIN?.toLowerCase();
+const allowedTailscaleLogins = new Set(
+  (process.env.ALLOWED_TAILSCALE_USER_LOGINS || "")
+    .split(",")
+    .map(login => login.trim().toLowerCase())
+    .filter(Boolean)
+);
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
 
 app.use("/api", (req, res, next) => {
   if (req.path === "/health") return next();
-  if (!allowedTailscaleLogin) return next();
+  if (!allowedTailscaleLogins.size) return next();
   const requester = req.get("Tailscale-User-Login")?.toLowerCase();
-  if (requester === allowedTailscaleLogin) return next();
+  if (requester && allowedTailscaleLogins.has(requester)) return next();
   res.status(403).json({ error: "Este usuario de Tailscale no tiene acceso al asistente." });
 });
 
