@@ -118,6 +118,16 @@ function styleFromText(text) {
   if (/\bjustificad/.test(normalized)) paragraphFormat.alignment = "justified";
   if (/\balinead[oa]?\s+a la derecha|\bderecha\b/.test(normalized)) paragraphFormat.alignment = "right";
   if (/\balinead[oa]?\s+a la izquierda|\bizquierda\b/.test(normalized)) paragraphFormat.alignment = "left";
+  if (/\binterlineado\b/.test(normalized)) {
+    if (/doble|2\s*(?:x|veces)?/.test(normalized)) paragraphFormat.lineSpacing = 24;
+    else if (/1[,.]5|uno y medio|media/.test(normalized)) paragraphFormat.lineSpacing = 18;
+    else paragraphFormat.lineSpacing = 12;
+  }
+  if (/una pagina|compact|reduc/.test(normalized)) {
+    paragraphFormat.lineSpacing = 11;
+    paragraphFormat.spaceBefore = 0;
+    paragraphFormat.spaceAfter = 0;
+  }
   return { font, paragraphFormat };
 }
 
