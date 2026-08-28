@@ -46,6 +46,12 @@ async function applyOperation(operation) {
       await context.sync();
       return true;
     }
+    if (operation.type === "format_paragraph") {
+      const paragraph = context.document.body.paragraphs.getItemAt(operation.paragraph - 1);
+      applyFont(paragraph, operation.font);
+      await context.sync();
+      return true;
+    }
     let range;
     if (operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type)) range = context.document.getSelection();
     else range = await findFirstRange(context, operation.find);
