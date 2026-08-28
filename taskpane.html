@@ -18,10 +18,10 @@
         <button id="refresh-context">Actualizar contexto</button>
       </section>
       <section id="messages" class="messages" aria-live="polite">
-        <article class="assistant">Hola. Puedo resumir, reescribir o analizar el documento. Selecciona texto para trabajar sobre una parte concreta.</article>
+        <article class="assistant">Describe el cambio que quieres. Prepararé una vista previa y, al aplicarla, editaré el documento directamente. Selecciona texto para limitar el cambio a esa parte.</article>
       </section>
-      <div id="actions" class="actions hidden"><button id="insert">Insertar en cursor</button><button id="replace">Reemplazar selección</button></div>
-      <form id="chat-form"><textarea id="prompt" rows="3" placeholder="Pregunta algo sobre el documento…"></textarea><button id="send" type="submit">Enviar</button></form>
+      <div id="actions" class="actions hidden"><button id="apply">Aplicar cambios</button><button id="discard">Descartar</button></div>
+      <form id="chat-form"><textarea id="prompt" rows="3" placeholder="Ej.: Haz más claro el segundo párrafo y resalta las conclusiones."></textarea><button id="send" type="submit">Editar</button></form>
     </main>
     <script type="module" src="/src/taskpane/taskpane.js"></script>
   </body>

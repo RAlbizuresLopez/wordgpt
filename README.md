@@ -1,12 +1,13 @@
 # Word GPT
 
-Complemento de Microsoft Word con un panel de chat que lee el documento actual, entiende la selección y puede insertar o sustituir texto generado. El modelo se ejecuta con Ollama en un Mac mini privado.
+Complemento de Microsoft Word que lee el documento actual, entiende la selección y prepara cambios directos al estilo de un agente de código. El modelo se ejecuta con Ollama en un Mac mini privado.
 
 ## Qué incluye
 
-- Panel de conversación en español.
+- Panel de edición en español con vista previa y botón explícito para aplicar o descartar cambios.
 - Contexto del documento completo (limitado a 24 000 caracteres) y de la selección activa.
-- Botones para insertar la última respuesta o reemplazar la selección.
+- Reemplazos e inserciones anclados a fragmentos exactos del documento; cada ancla se aplica solo a la primera coincidencia.
+- Formato de texto: negrita, cursiva, fuente, tamaño, color y resaltado.
 - Gateway en el Mac mini que llama a Ollama por `localhost`; la laptop de la usuaria no ejecuta modelos ni guarda claves.
 - Acceso privado mediante Tailscale Serve, sin puertos públicos.
 
@@ -57,6 +58,10 @@ pnpm run sideload
 
 En macOS, si el sideload no abre Word automáticamente, usa **Insertar → Complementos → Mis complementos → Cargar mis complementos** y selecciona `manifest.xml`.
 
+## Editar un documento
+
+Selecciona una parte si quieres limitar el alcance y escribe una instrucción como: “reescribe esta selección con tono más claro”, “después de la introducción añade un párrafo de conclusiones”, o “resalta en amarillo las conclusiones y ponlas en negrita”. El complemento presenta el número de cambios previstos. Revisa el resumen y pulsa **Aplicar cambios**; Word conserva su historial normal de deshacer.
+
 ## Mac mini y Tailscale
 
 Ejecuta el gateway únicamente en el Mac mini. Ollama continúa en `127.0.0.1:11434`; no lo enlaces a `0.0.0.0` ni abras su puerto. Cuando el gateway esté activo en el puerto 3000, publícalo **solo dentro de tu tailnet** con:
@@ -71,6 +76,6 @@ El contenido se manda únicamente al Mac mini cuando se hace una consulta. Revis
 
 ## Producción
 
-Cuando pruebes el flujo, sirve el frontend y el endpoint `/api/chat` desde un único proceso HTTP en el Mac mini y publícalo mediante Tailscale Serve. El manifiesto ya usa el dominio privado de Tailscale; no lo publiques fuera de tu tailnet.
+Cuando pruebes el flujo, sirve el frontend y los endpoints `/api/chat` y `/api/edit` desde un único proceso HTTP en el Mac mini y publícalo mediante Tailscale Serve. El manifiesto ya usa el dominio privado de Tailscale; no lo publiques fuera de tu tailnet.
 
 La integración utiliza la [API de chat de Ollama](https://docs.ollama.com/api/chat).
