@@ -113,8 +113,51 @@ async function paragraphAt(context, number) {
   return paragraphs.items[number - 1] || null;
 }
 
+const headerFooterKinds = {
+  primary: Word.HeaderFooterType.primary,
+  first_page: Word.HeaderFooterType.firstPage,
+  even_pages: Word.HeaderFooterType.evenPages
+};
+
+async function setHeaderOrFooter(context, operation, isHeader) {
+  const sections = context.document.sections;
+  sections.load("items"); await context.sync();
+  const kind = headerFooterKinds[operation.kind] || Word.HeaderFooterType.primary;
+  for (const section of sections.items) {
+    const part = isHeader ? section.getHeader(kind) : section.getFooter(kind);
+    part.clear();
+    part.insertText(operation.text, Word.InsertLocation.start);
+  }
+  await context.sync();
+  return true;
+}
+
+async function insertTable(context, operation) {
+  const values = operation.values;
+  const rowCount = values.length, columnCount = values[0].length;
+  if (operation.location === "document_end") context.document.body.insertTable(rowCount, columnCount, Word.InsertLocation.end, values);
+  else context.document.getSelection().insertTable(rowCount, columnCount, Word.InsertLocation.after, values);
+  await context.sync();
+  return true;
+}
+
+async function insertPageBreak(context, operation) {
+  if (operation.location === "document_end") context.document.body.insertBreak(Word.BreakType.page, Word.InsertLocation.end);
+  else context.document.getSelection().insertBreak(Word.BreakType.page, Word.InsertLocation.after);
+  await context.sync();
+  return true;
+}
+
+const documentTools = {
+  set_header: (context, operation) => setHeaderOrFooter(context, operation, true),
+  set_footer: (context, operation) => setHeaderOrFooter(context, operation, false),
+  insert_table: insertTable,
+  insert_page_break: insertPageBreak
+};
+
 async function applyOperation(operation) {
   return Word.run(async (context) => {
+    if (documentTools[operation.type]) return documentTools[operation.type](context, operation);
     if (operation.type === "insert_at_cursor") {
       context.document.body.insertText(operation.text, Word.InsertLocation.replace);
       await context.sync();

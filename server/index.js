@@ -19,7 +19,7 @@ const allowedTailscaleLogins = new Set(
     .filter(Boolean)
 );
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
-const editInstructions = `Eres el motor de edición de Word. Devuelve ÚNICAMENTE JSON válido: {"summary":"breve","operations":[...]}. Operaciones: replace/find/replacement, insert_before o insert_after/find/text, replace_selection/text, insert_at_selection/text, insert_at_cursor/text para documento vacío; format con target selection o find; format_paragraph con paragraph (1,2,3...); y format_document para todo el documento. Las operaciones de formato aceptan "font" y/o "paragraphFormat". font: bold, italic, underline (none|single|double), strikethrough, color, highlightColor, size, name, allCaps, smallCaps, superscript, subscript. paragraphFormat: alignment (left|centered|right|justified), leftIndent, rightIndent, firstLineIndent, spaceBefore, spaceAfter, lineSpacing, keepTogether, keepWithNext, widowControl. Usa format_document para el formato base del resto del documento y ponlo ANTES de una selección especial, para que la selección la sobrescriba. Usa format_paragraph para "segundo párrafo". Máximo 10 operaciones. find debe aparecer exactamente en el contexto y medir máximo 240 caracteres. Si hay selección, priorízala. No inventes fragmentos. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
+const editInstructions = `Eres el motor de edición de Word. Devuelve ÚNICAMENTE JSON válido: {"summary":"breve","operations":[...]}. Operaciones de texto: replace/find/replacement, insert_before o insert_after/find/text, replace_selection/text, insert_at_selection/text, insert_at_cursor/text para documento vacío. Operaciones de formato: format con target selection o find; format_paragraph con paragraph (1,2,3...); y format_document para todo el documento. Las operaciones de formato aceptan "font" y/o "paragraphFormat". font: bold, italic, underline (none|single|double), strikethrough, color, highlightColor, size, name, allCaps, smallCaps, superscript, subscript. paragraphFormat: alignment (left|centered|right|justified), leftIndent, rightIndent, firstLineIndent, spaceBefore, spaceAfter, lineSpacing, keepTogether, keepWithNext, widowControl. Herramientas estructurales: set_header/text/kind (primary|first_page|even_pages), set_footer/text/kind, insert_table/values (matriz de texto rectangular, máximo 20 filas x 12 columnas, location cursor|document_end), insert_page_break/location (cursor|document_end). set_header y set_footer sustituyen ese encabezado o pie en todas las secciones. Usa format_document para el formato base del resto del documento y ponlo ANTES de una selección especial, para que la selección la sobrescriba. Usa format_paragraph para "segundo párrafo". Máximo 10 operaciones. find debe aparecer exactamente en el contexto y medir máximo 240 caracteres. Si hay selección, priorízala. No inventes fragmentos. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
 
 app.use("/api", (req, res, next) => {
   if (req.path === "/health") return next();
@@ -75,7 +75,7 @@ async function searchWeb(query) {
 }
 
 function sanitizeEditPlan(value, { hasSelection, context }) {
-  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format", "format_paragraph", "format_document"]);
+  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format", "format_paragraph", "format_document", "set_header", "set_footer", "insert_table", "insert_page_break"]);
   const allowedFonts = new Set(["bold", "italic", "underline", "strikethrough", "color", "highlightColor", "size", "name", "allCaps", "smallCaps", "superscript", "subscript"]);
   const allowedParagraphs = new Set(["alignment", "leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]);
   const operations = Array.isArray(value?.operations) ? value.operations.slice(0, 10) : [];
@@ -86,6 +86,24 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
     const find = typeof operation.find === "string" ? operation.find.trim().slice(0, 240) : "";
     const text = typeof operation.text === "string" ? operation.text.slice(0, 12000) : "";
     const replacement = typeof operation.replacement === "string" ? operation.replacement.slice(0, 12000) : "";
+    if (["set_header", "set_footer"].includes(type)) {
+      if (!text) return [];
+      const kind = ["primary", "first_page", "even_pages"].includes(String(operation.kind).toLowerCase()) ? String(operation.kind).toLowerCase() : "primary";
+      return [{ type, text, kind }];
+    }
+    if (type === "insert_table") {
+      const rawValues = Array.isArray(operation.values) ? operation.values : Array.isArray(operation.rows) ? operation.rows : [];
+      const values = rawValues.slice(0, 20).map((row) => Array.isArray(row) ? row.slice(0, 12).map((cell) => String(cell ?? "").slice(0, 1000)) : []);
+      const columns = Math.max(...values.map((row) => row.length), 0);
+      if (!values.length || !columns) return [];
+      const rectangularValues = values.map((row) => [...row, ...Array(Math.max(0, columns - row.length)).fill("")]);
+      const location = ["cursor", "document_end"].includes(operation.location) ? operation.location : "cursor";
+      return [{ type, values: rectangularValues, location }];
+    }
+    if (type === "insert_page_break") {
+      const location = ["cursor", "document_end"].includes(operation.location) ? operation.location : "cursor";
+      return [{ type, location }];
+    }
     if (["replace", "insert_after", "insert_before"].includes(type) && !find) return [];
     if (["replace_selection", "insert_at_selection"].includes(type) && (!text || !hasSelection)) return [];
     if (type === "insert_at_cursor" && (!text || hasSelection)) return [];

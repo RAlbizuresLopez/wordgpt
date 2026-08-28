@@ -7,7 +7,8 @@ Complemento de Microsoft Word que lee el documento actual, entiende la selecció
 - Panel de edición en español con vista previa y botón explícito para aplicar o descartar cambios.
 - Contexto del documento completo (limitado a 24 000 caracteres) y de la selección activa.
 - Reemplazos e inserciones anclados a fragmentos exactos del documento; cada ancla se aplica solo a la primera coincidencia. En documentos vacíos puede crear el contenido en el cursor.
-- Formato de texto: negrita, cursiva, fuente, tamaño, color y resaltado.
+- Formato de texto y párrafo: negrita, cursiva, subrayado, fuente, tamaño, color, resaltado, alineación, sangrías, espaciado e interlineado.
+- Herramientas estructurales del documento: crear o sustituir encabezados y pies en todas las secciones, insertar tablas y saltos de página.
 - Búsqueda web opcional con SearXNG autoalojado, fuentes citables y extracción limitada a páginas HTTPS públicas.
 - Gateway en el Mac mini que llama a Ollama por `localhost`; la laptop de la usuaria no ejecuta modelos ni guarda claves.
 - Acceso privado mediante Tailscale Serve, sin puertos públicos.
@@ -68,6 +69,8 @@ En macOS, si el sideload no abre Word automáticamente, usa **Insertar → Compl
 ## Editar un documento
 
 Selecciona una parte si quieres limitar el alcance y escribe una instrucción como: “reescribe esta selección con tono más claro”, “después de la introducción añade un párrafo de conclusiones”, o “resalta en amarillo las conclusiones y ponlas en negrita”. El complemento presenta el número de cambios previstos. Revisa el resumen y pulsa **Aplicar cambios**; Word conserva su historial normal de deshacer.
+
+El agente usa una capa interna de herramientas Word: no requiere instalar un servidor MCP ni permisos adicionales en cada laptop. Ya puedes pedir, por ejemplo: “pon `Confidencial` como encabezado”, “añade un pie con el número de expediente”, “inserta una tabla con Nombre, Fecha y Observaciones”, o “inserta un salto de página al final”. Imágenes, formas, comentarios y controles avanzados se añadirán como herramientas específicas en la siguiente expansión; no todas las acciones de la cinta de Word están expuestas todavía.
 
 ## Mac mini y Tailscale
 
