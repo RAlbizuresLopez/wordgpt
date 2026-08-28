@@ -265,9 +265,13 @@ app.post("/api/edit", async (req, res) => {
     try { plan = JSON.parse(data.message?.content || ""); }
     catch { return res.status(502).json({ error: "El modelo no devolvió un plan de edición válido. Inténtalo de nuevo." }); }
     const safePlan = sanitizeEditPlan(plan, { hasSelection: Boolean(selectionText.trim()), context });
+    const structuralFallback = fallbackStructuralOperation(message);
     const requestedFallback = fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
-    if (!safePlan.operations.length) {
-      const fallback = fallbackStructuralOperation(message) || fallbackParagraphFormat(message);
+    if (structuralFallback) {
+      // Las estructuras de Word no deben degradarse a búsquedas de texto generadas por el modelo.
+      safePlan.operations = [structuralFallback];
+    } else if (!safePlan.operations.length) {
+      const fallback = fallbackParagraphFormat(message);
       safePlan.operations = fallback ? [fallback] : requestedFallback;
     } else if (requestedFallback.length) {
       for (const requested of requestedFallback) {
