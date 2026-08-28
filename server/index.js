@@ -50,8 +50,9 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
   const allowedParagraphs = new Set(["alignment", "leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]);
   const operations = Array.isArray(value?.operations) ? value.operations.slice(0, 10) : [];
   const clean = operations.flatMap((operation) => {
-    if (!operation || !allowedTypes.has(operation.type)) return [];
-    const { type } = operation;
+    if (!operation) return [];
+    const type = operation.type === "format" && ["document", "all", "body"].includes(String(operation.target).toLowerCase()) ? "format_document" : operation.type;
+    if (!allowedTypes.has(type)) return [];
     const find = typeof operation.find === "string" ? operation.find.trim().slice(0, 240) : "";
     const text = typeof operation.text === "string" ? operation.text.slice(0, 12000) : "";
     const replacement = typeof operation.replacement === "string" ? operation.replacement.slice(0, 12000) : "";
@@ -70,7 +71,7 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
         if (key === "underline") return ["none", "single", "double"].includes(String(item).toLowerCase());
         return typeof item === "string" && item.length <= 80;
       }));
-      const paragraphFormat = Object.fromEntries(Object.entries(operation.paragraphFormat || operation.paragraph_style || operation.paragraph || {}).filter(([key, item]) => {
+      const paragraphFormat = Object.fromEntries(Object.entries(operation.paragraphFormat || operation.paragraph_style || (typeof operation.paragraph === "object" ? operation.paragraph : {}) || {}).filter(([key, item]) => {
         if (!allowedParagraphs.has(key)) return false;
         if (["keepTogether", "keepWithNext", "widowControl"].includes(key)) return typeof item === "boolean";
         if (key === "alignment") return ["left", "centered", "right", "justified"].includes(String(item).toLowerCase());
@@ -101,6 +102,37 @@ function fallbackParagraphFormat(message) {
   if (/\bcursiva\b/.test(text)) font.italic = !/(?:sin|quitar)\s+cursiva/.test(text);
   if (/\bresalta(?:r|do)?\b/.test(text) && /amarillo/.test(text)) font.highlightColor = "yellow";
   return Object.keys(font).length ? { type: "format_paragraph", paragraph, font } : null;
+}
+
+function styleFromText(text) {
+  const normalized = text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const font = {}, paragraphFormat = {};
+  const colors = [["verde", "#008000"], ["rojo", "#FF0000"], ["azul", "#0000FF"], ["negro", "#000000"], ["morado", "#800080"], ["violeta", "#800080"]];
+  const color = colors.find(([name]) => new RegExp(`\\b${name}\\b`).test(normalized));
+  if (color) font.color = color[1];
+  if (/\bnegrita\b/.test(normalized)) font.bold = true;
+  if (/\bcursiva\b/.test(normalized)) font.italic = true;
+  if (/\bsubrayad/.test(normalized)) font.underline = "single";
+  if (/\btachad/.test(normalized)) font.strikethrough = true;
+  if (/\bcentrad/.test(normalized)) paragraphFormat.alignment = "centered";
+  if (/\bjustificad/.test(normalized)) paragraphFormat.alignment = "justified";
+  if (/\balinead[oa]?\s+a la derecha|\bderecha\b/.test(normalized)) paragraphFormat.alignment = "right";
+  if (/\balinead[oa]?\s+a la izquierda|\bizquierda\b/.test(normalized)) paragraphFormat.alignment = "left";
+  return { font, paragraphFormat };
+}
+
+function fallbackSelectionAndDocumentFormat(message, hasSelection) {
+  const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const restStart = normalized.search(/\b(resto|documento restante|todo el documento|demas texto)\b/);
+  const selectionPart = restStart >= 0 ? message.slice(0, restStart) : message;
+  const documentPart = restStart >= 0 ? message.slice(restStart) : "";
+  const selectionStyle = styleFromText(selectionPart), documentStyle = styleFromText(documentPart);
+  const hasStyle = (style) => Object.keys(style.font).length || Object.keys(style.paragraphFormat).length;
+  const operations = [];
+  if (hasStyle(documentStyle)) operations.push({ type: "format_document", ...documentStyle });
+  if (hasSelection && hasStyle(selectionStyle)) operations.push({ type: "format", target: "selection", ...selectionStyle });
+  if (!hasSelection && hasStyle(selectionStyle) && !operations.length) operations.push({ type: "format_document", ...selectionStyle });
+  return operations;
 }
 
 app.post("/api/chat", async (req, res) => {
@@ -157,7 +189,7 @@ app.post("/api/edit", async (req, res) => {
     const safePlan = sanitizeEditPlan(plan, { hasSelection: Boolean(selectionText.trim()), context });
     if (!safePlan.operations.length) {
       const fallback = fallbackParagraphFormat(message);
-      if (fallback) safePlan.operations = [fallback];
+      safePlan.operations = fallback ? [fallback] : fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
     }
     res.json(safePlan);
   } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
