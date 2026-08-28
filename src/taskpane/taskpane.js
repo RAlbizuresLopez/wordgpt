@@ -1,25 +1,49 @@
 const ui = {
   messages: document.querySelector("#messages"), prompt: document.querySelector("#prompt"), form: document.querySelector("#chat-form"), send: document.querySelector("#send"),
-  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard")
+  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), resetTheme: document.querySelector("#reset-theme")
 };
-let documentText = "", selectionText = "", pendingPlan = null, history = [];
+let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, pendingPlan = null, history = [];
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Word) show("Este complemento debe abrirse desde Microsoft Word.", "error");
-  else refreshContext();
+  else {
+    loadTheme(); refreshContext();
+    try { Office.context.document.addHandlerAsync(Office.EventType.DocumentSelectionChanged, refreshContext); } catch { /* El botón Actualizar contexto sigue disponible. */ }
+  }
 });
 
 function show(content, type = "assistant") { const message = document.createElement("article"); message.className = type; message.textContent = content; ui.messages.append(message); ui.messages.scrollTop = ui.messages.scrollHeight; return message; }
 function trim(text, limit = 24000) { return text.length > limit ? `${text.slice(0, limit)}\n\n[El resto del documento no se envió por longitud.]` : text; }
 function planDescription(plan) { return `${plan.summary}\n\n${plan.operations.length} cambio${plan.operations.length === 1 ? "" : "s"} listo${plan.operations.length === 1 ? "" : "s"} para aplicar.`; }
 
+function renderSelectionContext() {
+  if (!activeSelectionText) { ui.selectionContext.classList.add("hidden"); return; }
+  ui.selectionContext.classList.remove("hidden");
+  ui.selectionPreview.textContent = activeSelectionText;
+  ui.selectionState.textContent = includeSelection ? "Se enviará con tu instrucción" : "No se enviará con tu instrucción";
+  ui.toggleSelection.textContent = includeSelection ? "Quitar del contexto" : "Usar como contexto";
+}
+
+function setTheme(panel, accent) {
+  document.documentElement.style.setProperty("--panel-background", panel);
+  document.documentElement.style.setProperty("--accent", accent);
+  ui.panelColor.value = panel; ui.accentColor.value = accent;
+  localStorage.setItem("word-gpt-panel-color", panel); localStorage.setItem("word-gpt-accent-color", accent);
+}
+
+function loadTheme() { setTheme(localStorage.getItem("word-gpt-panel-color") || "#17171c", localStorage.getItem("word-gpt-accent-color") || "#7456d8"); }
+
 async function refreshContext() {
   try {
     await Word.run(async (context) => {
       const body = context.document.body; const selection = context.document.getSelection();
       body.load("text"); selection.load("text"); await context.sync();
-      documentText = trim(body.text || ""); selectionText = trim(selection.text || "", 10000);
-      ui.context.textContent = selectionText ? `Selección: ${selectionText.length.toLocaleString()} caracteres` : `Documento: ${documentText.length.toLocaleString()} caracteres`;
+      documentText = trim(body.text || "");
+      const nextSelection = trim(selection.text || "", 10000);
+      if (nextSelection !== activeSelectionText) includeSelection = true;
+      activeSelectionText = nextSelection; selectionText = includeSelection ? activeSelectionText : "";
+      renderSelectionContext();
+      ui.context.textContent = activeSelectionText ? `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}` : `Documento: ${documentText.length.toLocaleString()} caracteres`;
     });
   } catch { ui.context.textContent = "No se pudo leer el documento"; }
 }
@@ -84,6 +108,10 @@ ui.settings.onclick = () => ui.config.classList.toggle("hidden");
 ui.refresh.onclick = refreshContext;
 ui.apply.onclick = applyPlan;
 ui.discard.onclick = () => { pendingPlan = null; ui.actions.classList.add("hidden"); show("Cambios descartados."); };
+ui.toggleSelection.onclick = () => { includeSelection = !includeSelection; selectionText = includeSelection ? activeSelectionText : ""; renderSelectionContext(); ui.context.textContent = `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}`; };
+ui.panelColor.oninput = () => setTheme(ui.panelColor.value, ui.accentColor.value);
+ui.accentColor.oninput = () => setTheme(ui.panelColor.value, ui.accentColor.value);
+ui.resetTheme.onclick = () => setTheme("#17171c", "#7456d8");
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
   await refreshContext(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");

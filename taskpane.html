@@ -12,6 +12,11 @@
       <header><span class="mark">✦</span><div><strong>Word GPT</strong><small>Asistente del documento</small></div><button id="settings" title="Configuración">⚙</button></header>
       <section id="config" class="config hidden">
         <p>Este asistente utiliza un modelo local en el Mac mini. El documento no se envía a OpenAI ni a Anthropic.</p>
+        <div class="theme-controls">
+          <label>Fondo del panel <input id="panel-color" type="color" value="#17171c" /></label>
+          <label>Color de acento <input id="accent-color" type="color" value="#7456d8" /></label>
+          <button id="reset-theme" type="button">Restablecer colores</button>
+        </div>
       </section>
       <section class="context">
         <span id="context-label">Listo para leer el documento</span>
@@ -21,6 +26,11 @@
         <article class="assistant">Describe el cambio que quieres. Prepararé una vista previa y, al aplicarla, editaré el documento directamente. Selecciona texto para limitar el cambio a esa parte.</article>
       </section>
       <div id="actions" class="actions hidden"><button id="apply">Aplicar cambios</button><button id="discard">Descartar</button></div>
+      <section id="selection-context" class="selection-context hidden">
+        <div><strong>Selección activa</strong><small id="selection-state"></small></div>
+        <button id="toggle-selection" type="button">Quitar del contexto</button>
+        <pre id="selection-preview"></pre>
+      </section>
       <form id="chat-form"><textarea id="prompt" rows="3" placeholder="Ej.: Haz más claro el segundo párrafo y resalta las conclusiones."></textarea><button id="send" type="submit">Editar</button></form>
     </main>
     <script type="module" src="/src/taskpane/taskpane.js"></script>
