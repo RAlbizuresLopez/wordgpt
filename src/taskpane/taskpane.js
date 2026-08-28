@@ -172,6 +172,12 @@ ui.discard.onclick = async () => { pendingPlan = null; ui.actions.classList.add(
 ui.toggleSelection.onclick = () => { includeSelection = !includeSelection; selectionText = includeSelection ? activeSelectionText : ""; renderSelectionContext(); ui.context.textContent = `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}`; };
 Object.values(themeInputs).forEach((input) => { ui[input].oninput = () => setTheme(colorsFromInputs()); });
 ui.resetTheme.onclick = () => setTheme(defaultTheme);
+ui.prompt.onkeydown = (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    event.preventDefault();
+    if (!ui.send.disabled) ui.form.requestSubmit();
+  }
+};
 
 async function anchorAndDeselectAfterSend() {
   if (!activeSelectionText) return;
