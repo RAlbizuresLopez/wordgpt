@@ -41,13 +41,17 @@ function applyFont(range, font) {
 
 async function applyOperation(operation) {
   return Word.run(async (context) => {
+    if (operation.type === "insert_at_cursor") {
+      context.document.body.insertText(operation.text, Word.InsertLocation.replace);
+      await context.sync();
+      return true;
+    }
     let range;
-    if (operation.target === "selection" || ["replace_selection", "insert_at_selection", "insert_at_cursor"].includes(operation.type)) range = context.document.getSelection();
+    if (operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type)) range = context.document.getSelection();
     else range = await findFirstRange(context, operation.find);
     if (!range) return false;
     if (operation.type === "replace" || operation.type === "replace_selection") range.insertText(operation.replacement ?? operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_after" || operation.type === "insert_at_selection") range.insertText(operation.text, Word.InsertLocation.after);
-    if (operation.type === "insert_at_cursor") range.insertText(operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_before") range.insertText(operation.text, Word.InsertLocation.before);
     if (operation.type === "format") applyFont(range, operation.font);
     await context.sync(); return true;
@@ -65,8 +69,8 @@ async function applyPlan() {
     }
     status.textContent = `Cambios aplicados: ${applied}.${skipped ? ` No encontré ${skipped} fragmento${skipped === 1 ? "" : "s"}; no se modificaron.` : ""}`;
     pendingPlan = null; ui.actions.classList.add("hidden"); await refreshContext();
-  } catch {
-    status.className = "error"; status.textContent = "No se pudieron aplicar todos los cambios. Verifica que el documento no esté protegido.";
+  } catch (error) {
+    status.className = "error"; status.textContent = `No se pudieron aplicar todos los cambios: ${error.message || "error de Word"}.`;
   } finally { ui.apply.disabled = false; ui.discard.disabled = false; }
 }
 
