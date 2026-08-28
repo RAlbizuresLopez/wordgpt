@@ -1,6 +1,6 @@
 const ui = {
   messages: document.querySelector("#messages"), prompt: document.querySelector("#prompt"), form: document.querySelector("#chat-form"), send: document.querySelector("#send"),
-  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), resetTheme: document.querySelector("#reset-theme")
+  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme")
 };
 let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, pendingPlan = null, history = [];
 
@@ -24,14 +24,19 @@ function renderSelectionContext() {
   ui.toggleSelection.textContent = includeSelection ? "Quitar del contexto" : "Usar como contexto";
 }
 
-function setTheme(panel, accent) {
-  document.documentElement.style.setProperty("--panel-background", panel);
-  document.documentElement.style.setProperty("--accent", accent);
-  ui.panelColor.value = panel; ui.accentColor.value = accent;
-  localStorage.setItem("word-gpt-panel-color", panel); localStorage.setItem("word-gpt-accent-color", accent);
+const defaultTheme = { panel: "#17171c", accent: "#7456d8", surface: "#292831", text: "#e9e9ed", muted: "#a2a2ac", border: "#303039" };
+const themeInputs = { panel: "panelColor", accent: "accentColor", surface: "surfaceColor", text: "textColor", muted: "mutedColor", border: "borderColor" };
+
+function setTheme(theme) {
+  for (const [name, color] of Object.entries(theme)) {
+    document.documentElement.style.setProperty(`--${name === "panel" ? "panel-background" : name}`, color);
+    ui[themeInputs[name]].value = color;
+    localStorage.setItem(`word-gpt-${name}-color`, color);
+  }
 }
 
-function loadTheme() { setTheme(localStorage.getItem("word-gpt-panel-color") || "#17171c", localStorage.getItem("word-gpt-accent-color") || "#7456d8"); }
+function colorsFromInputs() { return Object.fromEntries(Object.entries(themeInputs).map(([name, input]) => [name, ui[input].value])); }
+function loadTheme() { setTheme(Object.fromEntries(Object.entries(defaultTheme).map(([name, value]) => [name, localStorage.getItem(`word-gpt-${name}-color`) || value]))); }
 
 async function refreshContext() {
   try {
@@ -109,9 +114,8 @@ ui.refresh.onclick = refreshContext;
 ui.apply.onclick = applyPlan;
 ui.discard.onclick = () => { pendingPlan = null; ui.actions.classList.add("hidden"); show("Cambios descartados."); };
 ui.toggleSelection.onclick = () => { includeSelection = !includeSelection; selectionText = includeSelection ? activeSelectionText : ""; renderSelectionContext(); ui.context.textContent = `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}`; };
-ui.panelColor.oninput = () => setTheme(ui.panelColor.value, ui.accentColor.value);
-ui.accentColor.oninput = () => setTheme(ui.panelColor.value, ui.accentColor.value);
-ui.resetTheme.onclick = () => setTheme("#17171c", "#7456d8");
+Object.values(themeInputs).forEach((input) => { ui[input].oninput = () => setTheme(colorsFromInputs()); });
+ui.resetTheme.onclick = () => setTheme(defaultTheme);
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
   await refreshContext(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
