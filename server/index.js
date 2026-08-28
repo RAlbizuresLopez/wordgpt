@@ -284,6 +284,7 @@ app.post("/api/edit", async (req, res) => {
       }
       safePlan.operations = safePlan.operations.slice(0, 10);
     }
+    console.info("Word GPT edit plan", safePlan.operations.map(({ type, location, kind }) => ({ type, location, kind })));
     res.json(safePlan);
   } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
 });

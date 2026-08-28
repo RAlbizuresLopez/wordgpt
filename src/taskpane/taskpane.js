@@ -135,15 +135,16 @@ async function setHeaderOrFooter(context, operation, isHeader) {
 async function insertTable(context, operation) {
   const values = operation.values;
   const rowCount = values.length, columnCount = values[0].length;
-  if (operation.location === "document_end") context.document.body.insertTable(rowCount, columnCount, Word.InsertLocation.end, values);
-  else context.document.getSelection().insertTable(rowCount, columnCount, Word.InsertLocation.after, values);
+  // Literales, en vez de los enums, para compatibilidad con clientes Word de Mac antiguos.
+  if (operation.location === "document_end") context.document.body.insertTable(rowCount, columnCount, "End", values);
+  else context.document.getSelection().insertTable(rowCount, columnCount, "After", values);
   await context.sync();
   return true;
 }
 
 async function insertPageBreak(context, operation) {
-  if (operation.location === "document_end") context.document.body.insertBreak(Word.BreakType.page, Word.InsertLocation.end);
-  else context.document.getSelection().insertBreak(Word.BreakType.page, Word.InsertLocation.after);
+  if (operation.location === "document_end") context.document.body.insertBreak(Word.BreakType.page, "End");
+  else context.document.getSelection().insertBreak(Word.BreakType.page, "After");
   await context.sync();
   return true;
 }
