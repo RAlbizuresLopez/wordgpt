@@ -2,7 +2,7 @@ const ui = {
   messages: document.querySelector("#messages"), prompt: document.querySelector("#prompt"), form: document.querySelector("#chat-form"), send: document.querySelector("#send"),
   settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme")
 };
-let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, pendingPlan = null, history = [];
+let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, selectionAnchorId = null, pendingPlan = null, history = [];
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Word) show("Este complemento debe abrirse desde Microsoft Word.", "error");
@@ -117,7 +117,8 @@ async function applyOperation(operation) {
       return true;
     }
     let range;
-    if (operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type)) range = context.document.getSelection();
+    if (operation.anchorId) range = context.document.contentControls.getById(operation.anchorId).getRange();
+    else if (operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type)) range = context.document.getSelection();
     else range = await findFirstRange(context, operation.find);
     if (!range) return false;
     if (operation.type === "replace" || operation.type === "replace_selection") range.insertText(operation.replacement ?? operation.text, Word.InsertLocation.replace);
@@ -126,6 +127,17 @@ async function applyOperation(operation) {
     if (operation.type === "format") { applyFont(range, operation.font); applyParagraphFormat(range, operation.paragraphFormat); }
     await context.sync(); return true;
   });
+}
+
+async function removeSelectionAnchor() {
+  if (!selectionAnchorId) return;
+  const anchorId = selectionAnchorId; selectionAnchorId = null;
+  try {
+    await Word.run(async (context) => {
+      context.document.contentControls.getById(anchorId).delete(false);
+      await context.sync();
+    });
+  } catch { /* El ancla pudo haber sido eliminada por una edición. */ }
 }
 
 async function applyPlan() {
@@ -139,7 +151,7 @@ async function applyPlan() {
       else skipped += 1;
     }
     status.textContent = `Cambios aplicados: ${applied}.${skipped ? ` No encontré ${skipped} fragmento${skipped === 1 ? "" : "s"}; no se modificaron.` : ""}`;
-    pendingPlan = null; ui.actions.classList.add("hidden"); await refreshContext();
+    pendingPlan = null; ui.actions.classList.add("hidden"); await removeSelectionAnchor(); await refreshContext();
   } catch (error) {
     status.className = "error"; status.textContent = `No se pudieron aplicar todos los cambios: ${error.message || "error de Word"}.`;
   } finally { ui.apply.disabled = false; ui.discard.disabled = false; }
@@ -148,31 +160,35 @@ async function applyPlan() {
 ui.settings.onclick = () => ui.config.classList.toggle("hidden");
 ui.refresh.onclick = refreshContext;
 ui.apply.onclick = applyPlan;
-ui.discard.onclick = () => { pendingPlan = null; ui.actions.classList.add("hidden"); show("Cambios descartados."); };
+ui.discard.onclick = async () => { pendingPlan = null; ui.actions.classList.add("hidden"); await removeSelectionAnchor(); show("Cambios descartados."); };
 ui.toggleSelection.onclick = () => { includeSelection = !includeSelection; selectionText = includeSelection ? activeSelectionText : ""; renderSelectionContext(); ui.context.textContent = `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}`; };
 Object.values(themeInputs).forEach((input) => { ui[input].oninput = () => setTheme(colorsFromInputs()); });
 ui.resetTheme.onclick = () => setTheme(defaultTheme);
 
-async function deselectAfterSend() {
+async function anchorAndDeselectAfterSend() {
   if (!activeSelectionText) return;
   try {
     await Word.run(async (context) => {
       const selection = context.document.getSelection();
+      const anchor = selection.insertContentControl(); anchor.load("id");
       selection.collapse(Word.InsertLocation.end); selection.select(); await context.sync();
+      selectionAnchorId = anchor.id;
     });
-  } catch { /* El contexto ya se capturó; la edición puede continuar. */ }
+  } catch { selectionAnchorId = null; }
   activeSelectionText = ""; selectionText = ""; includeSelection = true; renderSelectionContext();
   ui.context.textContent = `Documento: ${documentText.length.toLocaleString()} caracteres`;
 }
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
-  await refreshContext(); const selectionForRequest = selectionText; await deselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
+  await refreshContext(); const selectionForRequest = selectionText; await anchorAndDeselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
   try {
     const response = await fetch("/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error || "Error inesperado.");
+    if (selectionAnchorId) data.operations = data.operations.map((operation) => operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type) ? { ...operation, anchorId: selectionAnchorId } : operation);
     pendingPlan = data; pending.textContent = planDescription(data);
     if (data.operations.length) ui.actions.classList.remove("hidden");
+    else await removeSelectionAnchor();
     history = [...history, { role:"user", content:message }, { role:"assistant", content:data.summary }].slice(-8);
-  } catch (error) { pending.className = "error"; pending.textContent = error.message; }
+  } catch (error) { await removeSelectionAnchor(); pending.className = "error"; pending.textContent = error.message; }
   finally { ui.send.disabled = false; ui.prompt.focus(); }
 };
