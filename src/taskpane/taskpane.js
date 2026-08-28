@@ -88,18 +88,22 @@ function applyFont(range, font) {
 
 async function applyParagraphFormat(context, target, paragraphFormat) {
   if (!paragraphFormat) return;
-  let targets = [target];
-  if (target.paragraphs) {
-    target.paragraphs.load("items"); await context.sync();
-    targets = target.paragraphs.items;
-  }
   const alignment = { left: "Left", centered: "Centered", right: "Right", justified: "Justified" };
-  for (const item of targets) {
-    const format = item.paragraphFormat || item;
+  const applyTo = (format) => {
     if (typeof paragraphFormat.alignment === "string") format.alignment = alignment[paragraphFormat.alignment.toLowerCase()];
     for (const key of ["leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]) {
       if (paragraphFormat[key] !== undefined) format[key] = paragraphFormat[key];
     }
+  };
+  applyTo(target.paragraphFormat || target);
+  let targets = [];
+  if (target.paragraphs) {
+    target.paragraphs.load("items"); await context.sync();
+    targets = target.paragraphs.items;
+  }
+  for (const item of targets) {
+    applyTo(item);
+    if (item.paragraphFormat) applyTo(item.paragraphFormat);
   }
 }
 

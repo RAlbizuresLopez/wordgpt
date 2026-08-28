@@ -232,10 +232,15 @@ app.post("/api/edit", async (req, res) => {
       const fallback = fallbackParagraphFormat(message);
       safePlan.operations = fallback ? [fallback] : requestedFallback;
     } else if (requestedFallback.length) {
-      const hasDocumentFormat = safePlan.operations.some(({ type }) => type === "format_document");
-      const hasSelectionFormat = safePlan.operations.some(({ type, target }) => type === "format" && target === "selection");
-      const missing = requestedFallback.filter((operation) => (operation.type === "format_document" && !hasDocumentFormat) || (operation.type === "format" && operation.target === "selection" && !hasSelectionFormat));
-      safePlan.operations = [...missing.filter(({ type }) => type === "format_document"), ...safePlan.operations, ...missing.filter(({ type }) => type !== "format_document")].slice(0, 10);
+      for (const requested of requestedFallback) {
+        const existing = safePlan.operations.find((operation) => operation.type === requested.type && (requested.type !== "format" || operation.target === requested.target));
+        if (existing) {
+          existing.font = { ...existing.font, ...requested.font };
+          existing.paragraphFormat = { ...existing.paragraphFormat, ...requested.paragraphFormat };
+        } else if (requested.type === "format_document") safePlan.operations.unshift(requested);
+        else safePlan.operations.push(requested);
+      }
+      safePlan.operations = safePlan.operations.slice(0, 10);
     }
     res.json(safePlan);
   } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
