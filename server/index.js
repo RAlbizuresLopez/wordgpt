@@ -227,9 +227,15 @@ app.post("/api/edit", async (req, res) => {
     try { plan = JSON.parse(data.message?.content || ""); }
     catch { return res.status(502).json({ error: "El modelo no devolvió un plan de edición válido. Inténtalo de nuevo." }); }
     const safePlan = sanitizeEditPlan(plan, { hasSelection: Boolean(selectionText.trim()), context });
+    const requestedFallback = fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
     if (!safePlan.operations.length) {
       const fallback = fallbackParagraphFormat(message);
-      safePlan.operations = fallback ? [fallback] : fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
+      safePlan.operations = fallback ? [fallback] : requestedFallback;
+    } else if (requestedFallback.length) {
+      const hasDocumentFormat = safePlan.operations.some(({ type }) => type === "format_document");
+      const hasSelectionFormat = safePlan.operations.some(({ type, target }) => type === "format" && target === "selection");
+      const missing = requestedFallback.filter((operation) => (operation.type === "format_document" && !hasDocumentFormat) || (operation.type === "format" && operation.target === "selection" && !hasSelectionFormat));
+      safePlan.operations = [...missing.filter(({ type }) => type === "format_document"), ...safePlan.operations, ...missing.filter(({ type }) => type !== "format_document")].slice(0, 10);
     }
     res.json(safePlan);
   } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
