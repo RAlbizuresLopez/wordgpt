@@ -12,7 +12,7 @@
   <HighResolutionIconUrl DefaultValue="https://macmini4pro.tail97c777.ts.net/icon.svg.png" />
   <SupportUrl DefaultValue="https://macmini4pro.tail97c777.ts.net" />
   <Hosts><Host Name="Document" /></Hosts>
-  <Requirements><Sets DefaultMinVersion="1.3"><Set Name="WordApi" /></Sets></Requirements>
+  <Requirements><Sets DefaultMinVersion="1.5"><Set Name="WordApi" /></Sets></Requirements>
   <DefaultSettings>
     <SourceLocation DefaultValue="https://macmini4pro.tail97c777.ts.net/taskpane.html" />
   </DefaultSettings>

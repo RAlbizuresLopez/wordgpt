@@ -17,7 +17,7 @@ const allowedTailscaleLogins = new Set(
     .filter(Boolean)
 );
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
-const editInstructions = `Eres el motor de edición de un documento de Microsoft Word. Devuelve ÚNICAMENTE JSON válido, sin Markdown ni explicación exterior. La respuesta debe tener {"summary":"breve resumen","operations":[...]}. Operaciones permitidas: {"type":"replace","find":"fragmento exacto","replacement":"texto nuevo"}; {"type":"insert_after","find":"fragmento exacto","text":"texto"}; {"type":"insert_before","find":"fragmento exacto","text":"texto"}; {"type":"replace_selection","text":"texto nuevo"} (solo con selección); {"type":"insert_at_selection","text":"texto"} (solo con selección); {"type":"insert_at_cursor","text":"texto"} (solo si NO hay selección; úsalo para crear contenido, especialmente si el documento está vacío); {"type":"format","target":"selection"} o {"type":"format","find":"fragmento exacto"}; y {"type":"format_paragraph","paragraph":2,"font":{"color":"#0000FF","bold":true}} para un párrafo por número. Todas las operaciones de formato usan "font", que puede incluir bold, italic, color, highlightColor, size o name. Usa format_paragraph cuando el usuario diga primero, segundo, tercer párrafo o un número de párrafo. Usa máximo 10 operaciones. "find" debe aparecer exactamente en el contexto y tener máximo 240 caracteres. Cada búsqueda se aplicará solo a la primera coincidencia. No inventes fragmentos. Si hay una selección, prioriza cambiarla. Si el documento está vacío y se pide redactar contenido, usa insert_at_cursor con el contenido completo. Para formato usa format; los colores pueden ser CSS sencillos o hexadecimales. Si el cambio no es seguro, devuelve operations vacía y explica el motivo. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
+const editInstructions = `Eres el motor de edición de Word. Devuelve ÚNICAMENTE JSON válido: {"summary":"breve","operations":[...]}. Operaciones: replace/find/replacement, insert_before o insert_after/find/text, replace_selection/text, insert_at_selection/text, insert_at_cursor/text para documento vacío; format con target selection o find; format_paragraph con paragraph (1,2,3...); y format_document para todo el documento. Las operaciones de formato aceptan "font" y/o "paragraphFormat". font: bold, italic, underline (none|single|double), strikethrough, color, highlightColor, size, name, allCaps, smallCaps, superscript, subscript. paragraphFormat: alignment (left|centered|right|justified), leftIndent, rightIndent, firstLineIndent, spaceBefore, spaceAfter, lineSpacing, keepTogether, keepWithNext, widowControl. Usa format_document para el formato base del resto del documento y ponlo ANTES de una selección especial, para que la selección la sobrescriba. Usa format_paragraph para "segundo párrafo". Máximo 10 operaciones. find debe aparecer exactamente en el contexto y medir máximo 240 caracteres. Si hay selección, priorízala. No inventes fragmentos. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
 
 app.use("/api", (req, res, next) => {
   if (req.path === "/health") return next();
@@ -45,8 +45,9 @@ function makeContext(documentText, selectionText) {
 }
 
 function sanitizeEditPlan(value, { hasSelection, context }) {
-  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format", "format_paragraph"]);
-  const allowedFonts = new Set(["bold", "italic", "color", "highlightColor", "size", "name"]);
+  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format", "format_paragraph", "format_document"]);
+  const allowedFonts = new Set(["bold", "italic", "underline", "strikethrough", "color", "highlightColor", "size", "name", "allCaps", "smallCaps", "superscript", "subscript"]);
+  const allowedParagraphs = new Set(["alignment", "leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]);
   const operations = Array.isArray(value?.operations) ? value.operations.slice(0, 10) : [];
   const clean = operations.flatMap((operation) => {
     if (!operation || !allowedTypes.has(operation.type)) return [];
@@ -58,19 +59,28 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
     if (["replace_selection", "insert_at_selection"].includes(type) && (!text || !hasSelection)) return [];
     if (type === "insert_at_cursor" && (!text || hasSelection)) return [];
     if (type === "replace" && typeof operation.replacement !== "string") return [];
-    if (["format", "format_paragraph"].includes(type)) {
+    if (["format", "format_paragraph", "format_document"].includes(type)) {
       if (type === "format" && ((operation.target === "selection" && !hasSelection) || (operation.target !== "selection" && !find))) return [];
       const paragraph = Number(operation.paragraph);
       if (type === "format_paragraph" && (!Number.isInteger(paragraph) || paragraph < 1 || paragraph > 500)) return [];
       const font = Object.fromEntries(Object.entries(operation.font || {}).filter(([key, item]) => {
         if (!allowedFonts.has(key)) return false;
-        if (["bold", "italic"].includes(key)) return typeof item === "boolean";
+        if (["bold", "italic", "strikethrough", "allCaps", "smallCaps", "superscript", "subscript"].includes(key)) return typeof item === "boolean";
         if (key === "size") return typeof item === "number" && item >= 6 && item <= 96;
+        if (key === "underline") return ["none", "single", "double"].includes(String(item).toLowerCase());
         return typeof item === "string" && item.length <= 80;
       }));
-      if (!Object.keys(font).length || (find && !context.includes(find))) return [];
-      if (type === "format_paragraph") return [{ type, paragraph, font }];
-      return [{ type, ...(find ? { find } : { target: "selection" }), font }];
+      const paragraphFormat = Object.fromEntries(Object.entries(operation.paragraphFormat || operation.paragraph_style || operation.paragraph || {}).filter(([key, item]) => {
+        if (!allowedParagraphs.has(key)) return false;
+        if (["keepTogether", "keepWithNext", "widowControl"].includes(key)) return typeof item === "boolean";
+        if (key === "alignment") return ["left", "centered", "right", "justified"].includes(String(item).toLowerCase());
+        return typeof item === "number" && item >= -144 && item <= 144;
+      }));
+      if ((!Object.keys(font).length && !Object.keys(paragraphFormat).length) || (find && !context.includes(find))) return [];
+      const changes = { ...(Object.keys(font).length ? { font } : {}), ...(Object.keys(paragraphFormat).length ? { paragraphFormat } : {}) };
+      if (type === "format_paragraph") return [{ type, paragraph, ...changes }];
+      if (type === "format_document") return [{ type, ...changes }];
+      return [{ type, ...(find ? { find } : { target: "selection" }), ...changes }];
     }
     if (find && !context.includes(find)) return [];
     return [{ type, ...(find ? { find } : {}), ...(type === "replace" ? { replacement } : { text }) }];

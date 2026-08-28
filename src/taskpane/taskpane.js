@@ -60,12 +60,38 @@ async function findFirstRange(context, find) {
 }
 
 function applyFont(range, font) {
+  if (!font) return;
   if (typeof font.bold === "boolean") range.font.bold = font.bold;
   if (typeof font.italic === "boolean") range.font.italic = font.italic;
+  if (typeof font.strikethrough === "boolean") range.font.strikethrough = font.strikethrough;
+  if (typeof font.allCaps === "boolean") range.font.allCaps = font.allCaps;
+  if (typeof font.smallCaps === "boolean") range.font.smallCaps = font.smallCaps;
+  if (typeof font.superscript === "boolean") range.font.superscript = font.superscript;
+  if (typeof font.subscript === "boolean") range.font.subscript = font.subscript;
+  if (typeof font.underline === "string") {
+    const underline = { none: Word.UnderlineType.none, single: Word.UnderlineType.single, double: Word.UnderlineType.double };
+    range.font.underline = underline[font.underline.toLowerCase()];
+  }
   if (typeof font.color === "string") range.font.color = font.color;
   if (typeof font.highlightColor === "string") range.font.highlightColor = font.highlightColor;
   if (typeof font.size === "number") range.font.size = font.size;
   if (typeof font.name === "string") range.font.name = font.name;
+}
+
+function applyParagraphFormat(target, paragraphFormat) {
+  if (!paragraphFormat) return;
+  const format = target.paragraphFormat || target;
+  const alignment = { left: Word.Alignment.left, centered: Word.Alignment.centered, right: Word.Alignment.right, justified: Word.Alignment.justified };
+  if (typeof paragraphFormat.alignment === "string") format.alignment = alignment[paragraphFormat.alignment.toLowerCase()];
+  for (const key of ["leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]) {
+    if (paragraphFormat[key] !== undefined) format[key] = paragraphFormat[key];
+  }
+}
+
+async function paragraphAt(context, number) {
+  const paragraphs = context.document.body.paragraphs;
+  paragraphs.load("items"); await context.sync();
+  return paragraphs.items[number - 1] || null;
 }
 
 async function applyOperation(operation) {
@@ -76,8 +102,17 @@ async function applyOperation(operation) {
       return true;
     }
     if (operation.type === "format_paragraph") {
-      const paragraph = context.document.body.paragraphs.getItemAt(operation.paragraph - 1);
+      const paragraph = await paragraphAt(context, operation.paragraph);
+      if (!paragraph) return false;
       applyFont(paragraph, operation.font);
+      applyParagraphFormat(paragraph, operation.paragraphFormat);
+      await context.sync();
+      return true;
+    }
+    if (operation.type === "format_document") {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items"); await context.sync();
+      for (const paragraph of paragraphs.items) { applyFont(paragraph, operation.font); applyParagraphFormat(paragraph, operation.paragraphFormat); }
       await context.sync();
       return true;
     }
@@ -88,7 +123,7 @@ async function applyOperation(operation) {
     if (operation.type === "replace" || operation.type === "replace_selection") range.insertText(operation.replacement ?? operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_after" || operation.type === "insert_at_selection") range.insertText(operation.text, Word.InsertLocation.after);
     if (operation.type === "insert_before") range.insertText(operation.text, Word.InsertLocation.before);
-    if (operation.type === "format") applyFont(range, operation.font);
+    if (operation.type === "format") { applyFont(range, operation.font); applyParagraphFormat(range, operation.paragraphFormat); }
     await context.sync(); return true;
   });
 }
@@ -98,7 +133,8 @@ async function applyPlan() {
   ui.apply.disabled = true; ui.discard.disabled = true;
   const status = show("Aplicando cambios…"); let applied = 0, skipped = 0;
   try {
-    for (const operation of pendingPlan.operations) {
+    const orderedOperations = [...pendingPlan.operations].sort((a, b) => (b.type === "format_document") - (a.type === "format_document"));
+    for (const operation of orderedOperations) {
       if (await applyOperation(operation)) applied += 1;
       else skipped += 1;
     }
@@ -116,11 +152,23 @@ ui.discard.onclick = () => { pendingPlan = null; ui.actions.classList.add("hidde
 ui.toggleSelection.onclick = () => { includeSelection = !includeSelection; selectionText = includeSelection ? activeSelectionText : ""; renderSelectionContext(); ui.context.textContent = `Selección: ${activeSelectionText.length.toLocaleString()} caracteres${includeSelection ? "" : " (excluida)"}`; };
 Object.values(themeInputs).forEach((input) => { ui[input].oninput = () => setTheme(colorsFromInputs()); });
 ui.resetTheme.onclick = () => setTheme(defaultTheme);
+
+async function deselectAfterSend() {
+  if (!activeSelectionText) return;
+  try {
+    await Word.run(async (context) => {
+      const selection = context.document.getSelection();
+      selection.collapse(Word.InsertLocation.end); selection.select(); await context.sync();
+    });
+  } catch { /* El contexto ya se capturó; la edición puede continuar. */ }
+  activeSelectionText = ""; selectionText = ""; includeSelection = true; renderSelectionContext();
+  ui.context.textContent = `Documento: ${documentText.length.toLocaleString()} caracteres`;
+}
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
-  await refreshContext(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
+  await refreshContext(); const selectionForRequest = selectionText; await deselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
   try {
-    const response = await fetch("/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText, history }) });
+    const response = await fetch("/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error || "Error inesperado.");
     pendingPlan = data; pending.textContent = planDescription(data);
     if (data.operations.length) ui.actions.classList.remove("hidden");
