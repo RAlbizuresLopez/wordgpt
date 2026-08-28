@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { lookup } from "node:dns/promises";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -10,6 +11,7 @@ app.use(express.static("dist"));
 const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
 const ollamaModel = process.env.OLLAMA_MODEL || "qwen3:14b";
 const contextLength = Number(process.env.OLLAMA_CONTEXT_LENGTH || 8192);
+const searxngBaseUrl = (process.env.SEARXNG_BASE_URL || "http://searxng:8080").replace(/\/$/, "");
 const allowedTailscaleLogins = new Set(
   (process.env.ALLOWED_TAILSCALE_USER_LOGINS || "")
     .split(",")
@@ -42,6 +44,34 @@ function makeContext(documentText, selectionText) {
     selectionText && `SELECCIÓN ACTUAL:\n${selectionText}`,
     documentText && `DOCUMENTO (puede estar truncado):\n${documentText}`
   ].filter(Boolean).join("\n\n");
+}
+
+const privateIp = (address) => /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address) || address === "::1" || address.startsWith("fc") || address.startsWith("fd") || address.startsWith("fe80:");
+async function assertPublicHttps(url) {
+  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) throw new Error("Solo se pueden consultar páginas HTTPS públicas.");
+  const addresses = await lookup(url.hostname, { all: true });
+  if (!addresses.length || addresses.some(({ address }) => privateIp(address))) throw new Error("La URL no apunta a una dirección pública.");
+}
+function htmlToText(value) { return value.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/\s+/g, " ").trim(); }
+async function readPublicPage(rawUrl) {
+  let url = new URL(rawUrl);
+  for (let redirects = 0; redirects < 4; redirects += 1) {
+    await assertPublicHttps(url);
+    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "WordGPT-Research/1.0" } });
+    if ([301, 302, 303, 307, 308].includes(response.status)) { url = new URL(response.headers.get("location"), url); continue; }
+    if (!response.ok) throw new Error(`La página respondió ${response.status}.`);
+    if (!/text\/(html|plain)/i.test(response.headers.get("content-type") || "")) throw new Error("La URL no contiene texto web.");
+    const reader = response.body.getReader(); let bytes = 0, value = "";
+    while (bytes < 180000) { const { done, value: chunk } = await reader.read(); if (done) break; bytes += chunk.byteLength; value += new TextDecoder().decode(chunk, { stream: true }); }
+    reader.cancel().catch(() => {}); return htmlToText(value).slice(0, 12000);
+  }
+  throw new Error("Demasiadas redirecciones.");
+}
+async function searchWeb(query) {
+  const response = await fetch(`${searxngBaseUrl}/search?${new URLSearchParams({ q: query, format: "json", language: "es-ES", safesearch: "1" })}`, { signal: AbortSignal.timeout(12000) });
+  if (!response.ok) throw new Error("El servicio de búsqueda no está disponible.");
+  const data = await response.json();
+  return (data.results || []).filter(({ url }) => typeof url === "string" && url.startsWith("https://")).slice(0, 4).map(({ title, url, content }) => ({ title: String(title || "Fuente"), url, content: String(content || "") }));
 }
 
 function sanitizeEditPlan(value, { hasSelection, context }) {
@@ -203,6 +233,29 @@ app.post("/api/edit", async (req, res) => {
     }
     res.json(safePlan);
   } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
+});
+
+app.post("/api/research", async (req, res) => {
+  const { message, documentText = "", selectionText = "" } = req.body || {};
+  if (typeof message !== "string" || !message.trim()) return res.status(400).json({ error: "Escribe qué deseas investigar." });
+  try {
+    const results = await searchWeb(message.trim());
+    if (!results.length) return res.status(404).json({ error: "No encontré fuentes públicas para esa consulta." });
+    const researched = await Promise.all(results.slice(0, 3).map(async (result) => ({ ...result, text: await readPublicPage(result.url).catch(() => result.content) })));
+    const sources = researched.map(({ title, url }) => ({ title, url }));
+    const context = makeContext(documentText, selectionText);
+    const sourceText = researched.map((source, index) => `[${index + 1}] ${source.title}\n${source.url}\n${source.text}`).join("\n\n");
+    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, keep_alive: "2m", options: { num_ctx: contextLength, temperature: 0.2 }, messages: [
+        { role: "system", content: "Responde en español usando solo las fuentes proporcionadas. Incluye referencias [1], [2] junto a cada afirmación relevante. No inventes datos ni hagas diagnósticos, tratamientos o recomendaciones clínicas." },
+        { role: "user", content: `${context ? `${context}\n\n` : ""}CONSULTA:\n${message.trim()}\n\nFUENTES:\n${sourceText}` }
+      ] })
+    });
+    const data = await response.json();
+    if (!response.ok) return res.status(response.status).json({ error: data?.error || "Ollama no pudo analizar las fuentes." });
+    res.json({ answer: data.message?.content || "No se recibió respuesta.", sources });
+  } catch (error) { res.status(502).json({ error: error.message || "No se pudo completar la investigación web." }); }
 });
 
 app.listen(port, bindHost, () => console.log(`Gateway local listo en http://${bindHost}:${port} (Ollama: ${ollamaModel})`));

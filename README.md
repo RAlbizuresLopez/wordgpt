@@ -8,6 +8,7 @@ Complemento de Microsoft Word que lee el documento actual, entiende la selecció
 - Contexto del documento completo (limitado a 24 000 caracteres) y de la selección activa.
 - Reemplazos e inserciones anclados a fragmentos exactos del documento; cada ancla se aplica solo a la primera coincidencia. En documentos vacíos puede crear el contenido en el cursor.
 - Formato de texto: negrita, cursiva, fuente, tamaño, color y resaltado.
+- Búsqueda web opcional con SearXNG autoalojado, fuentes citables y extracción limitada a páginas HTTPS públicas.
 - Gateway en el Mac mini que llama a Ollama por `localhost`; la laptop de la usuaria no ejecuta modelos ni guarda claves.
 - Acceso privado mediante Tailscale Serve, sin puertos públicos.
 
@@ -48,6 +49,12 @@ tailscale serve --bg --https=443 http://127.0.0.1:3000
 ```
 
 Para actualizarlo tras cambios del repositorio, ejecuta `docker compose up -d --build`. Consulta los registros con `docker compose logs -f` y detén el servicio con `docker compose down`.
+
+### Consultar Internet
+
+Marca **Buscar en Internet** antes de enviar una consulta. La consulta escrita se envía al metabuscador SearXNG que corre dentro del Mac mini; el contenido del documento no se envía a buscadores ni a sitios externos. El gateway consulta hasta tres fuentes HTTPS públicas, limita redirecciones, tiempo y tamaño de cada descarga, y muestra enlaces a las fuentes en el panel antes de que decidas incorporar algo al documento.
+
+SearXNG no publica ningún puerto en el Mac ni en Tailscale: únicamente el gateway puede alcanzarlo por la red interna de Docker. Las búsquedas sí salen desde el Mac mini hacia los motores de búsqueda y las páginas seleccionadas.
 
 En otra terminal, valida e instala el manifiesto en Word:
 

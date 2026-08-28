@@ -1,0 +1,17 @@
+use_default_settings: true
+
+general:
+  instance_name: Word GPT Search
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  secret_key: "wordgpt-local-search-6c905e1383744a69b0c7d893bbf35df4"
+  limiter: false
+  image_proxy: true

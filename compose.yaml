@@ -1,4 +1,15 @@
 services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: wordgpt-search
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
   wordgpt:
     build:
       context: .
@@ -15,6 +26,7 @@ services:
       PORT: 3000
       # Docker necesita una interfaz de contenedor; el puerto del Mac sigue limitado a 127.0.0.1.
       BIND_HOST: 0.0.0.0
+      SEARXNG_BASE_URL: http://searxng:8080
     ports:
       # Solo Tailscale Serve, que se ejecuta en el host, puede alcanzar este puerto.
       - "127.0.0.1:3000:3000"

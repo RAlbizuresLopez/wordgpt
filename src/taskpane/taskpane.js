@@ -1,6 +1,6 @@
 const ui = {
   messages: document.querySelector("#messages"), prompt: document.querySelector("#prompt"), form: document.querySelector("#chat-form"), send: document.querySelector("#send"),
-  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme")
+  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme"), webResearch: document.querySelector("#web-research")
 };
 let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, selectionAnchorId = null, pendingPlan = null, history = [];
 
@@ -15,6 +15,14 @@ Office.onReady((info) => {
 function show(content, type = "assistant") { const message = document.createElement("article"); message.className = type; message.textContent = content; ui.messages.append(message); ui.messages.scrollTop = ui.messages.scrollHeight; return message; }
 function trim(text, limit = 24000) { return text.length > limit ? `${text.slice(0, limit)}\n\n[El resto del documento no se envió por longitud.]` : text; }
 function planDescription(plan) { return `${plan.summary}\n\n${plan.operations.length} cambio${plan.operations.length === 1 ? "" : "s"} listo${plan.operations.length === 1 ? "" : "s"} para aplicar.`; }
+function showResearchResult(message, data) {
+  message.textContent = data.answer;
+  if (!data.sources?.length) return;
+  const title = document.createElement("strong"); title.textContent = "\n\nFuentes"; message.append(title);
+  const list = document.createElement("ul");
+  data.sources.forEach(({ title: sourceTitle, url }) => { const item = document.createElement("li"); const link = document.createElement("a"); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = sourceTitle; item.append(link); list.append(item); });
+  message.append(list);
+}
 
 function renderSelectionContext() {
   if (!activeSelectionText) { ui.selectionContext.classList.add("hidden"); return; }
@@ -180,10 +188,11 @@ async function anchorAndDeselectAfterSend() {
 }
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
-  await refreshContext(); const selectionForRequest = selectionText; await anchorAndDeselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
+  await refreshContext(); const selectionForRequest = selectionText; const useWebResearch = ui.webResearch.checked; await anchorAndDeselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show(useWebResearch ? "Buscando fuentes públicas…" : "Preparando cambios…");
   try {
-    const response = await fetch("/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
+    const response = await fetch(useWebResearch ? "/api/research" : "/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error || "Error inesperado.");
+    if (useWebResearch) { await removeSelectionAnchor(); showResearchResult(pending, data); history = [...history, { role:"user", content:message }, { role:"assistant", content:data.answer }].slice(-8); return; }
     if (selectionAnchorId) data.operations = data.operations.map((operation) => operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type) ? { ...operation, anchorId: selectionAnchorId } : operation);
     pendingPlan = data; pending.textContent = planDescription(data);
     if (data.operations.length) ui.actions.classList.remove("hidden");
