@@ -193,6 +193,26 @@ function fallbackSelectionAndDocumentFormat(message, hasSelection) {
   return operations;
 }
 
+function fallbackStructuralOperation(message) {
+  const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  const location = /\b(final|terminar|ultimo)\b/.test(normalized) ? "document_end" : "cursor";
+  if (/\btabla\b/.test(normalized)) {
+    const columnsMatch = message.match(/columnas?\s+(.+?)(?:,?\s+con\s+(?:\d+|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+filas?|\.|$)/i);
+    const columns = (columnsMatch?.[1] || "Columna 1, Columna 2")
+      .split(/\s*,\s*|\s+y\s+/i).map((cell) => cell.trim()).filter(Boolean).slice(0, 12);
+    if (!columns.length) return null;
+    const words = { una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
+    const rowsMatch = normalized.match(/\b(\d+|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+filas?/);
+    const emptyRows = rowsMatch ? (Number(rowsMatch[1]) || words[rowsMatch[1]] || 0) : 2;
+    return { type: "insert_table", values: [columns, ...Array.from({ length: Math.min(emptyRows, 19) }, () => Array(columns.length).fill(""))], location };
+  }
+  if (/salto\s+de\s+pagina/.test(normalized)) return { type: "insert_page_break", location };
+  const headerFooter = /\b(encabezado|pie(?:\s+de\s+pagina)?)\b/.exec(normalized)?.[1];
+  const quoted = message.match(/[“"'`]([^“"'`]+)[”"'`]/)?.[1]?.trim();
+  if (headerFooter && quoted) return { type: headerFooter.startsWith("pie") ? "set_footer" : "set_header", text: quoted, kind: "primary" };
+  return null;
+}
+
 app.post("/api/chat", async (req, res) => {
   const { message, documentText = "", selectionText = "", history = [] } = req.body || {};
   if (typeof message !== "string" || !message.trim()) return res.status(400).json({ error: "Escribe un mensaje." });
@@ -247,7 +267,7 @@ app.post("/api/edit", async (req, res) => {
     const safePlan = sanitizeEditPlan(plan, { hasSelection: Boolean(selectionText.trim()), context });
     const requestedFallback = fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
     if (!safePlan.operations.length) {
-      const fallback = fallbackParagraphFormat(message);
+      const fallback = fallbackStructuralOperation(message) || fallbackParagraphFormat(message);
       safePlan.operations = fallback ? [fallback] : requestedFallback;
     } else if (requestedFallback.length) {
       for (const requested of requestedFallback) {
