@@ -17,7 +17,7 @@ const allowedTailscaleLogins = new Set(
     .filter(Boolean)
 );
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
-const editInstructions = `Eres el motor de edición de un documento de Microsoft Word. Devuelve ÚNICAMENTE JSON válido, sin Markdown ni explicación exterior. La respuesta debe tener {"summary":"breve resumen","operations":[...]}. Operaciones permitidas: {"type":"replace","find":"fragmento exacto","replacement":"texto nuevo"}; {"type":"insert_after","find":"fragmento exacto","text":"texto"}; {"type":"insert_before","find":"fragmento exacto","text":"texto"}; {"type":"replace_selection","text":"texto nuevo"} (solo con selección); {"type":"insert_at_selection","text":"texto"} (solo con selección); y {"type":"format","target":"selection"} o {"type":"format","find":"fragmento exacto"}, con "font" que puede incluir bold, italic, color, highlightColor, size o name. Usa máximo 10 operaciones. "find" debe aparecer exactamente en el contexto y tener máximo 240 caracteres. Cada búsqueda se aplicará solo a la primera coincidencia. No inventes fragmentos. Si hay una selección, prioriza cambiarla. Para formato usa format; los colores pueden ser CSS sencillos o hexadecimales. Si el cambio no es seguro, devuelve operations vacía y explica el motivo. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
+const editInstructions = `Eres el motor de edición de un documento de Microsoft Word. Devuelve ÚNICAMENTE JSON válido, sin Markdown ni explicación exterior. La respuesta debe tener {"summary":"breve resumen","operations":[...]}. Operaciones permitidas: {"type":"replace","find":"fragmento exacto","replacement":"texto nuevo"}; {"type":"insert_after","find":"fragmento exacto","text":"texto"}; {"type":"insert_before","find":"fragmento exacto","text":"texto"}; {"type":"replace_selection","text":"texto nuevo"} (solo con selección); {"type":"insert_at_selection","text":"texto"} (solo con selección); {"type":"insert_at_cursor","text":"texto"} (solo si NO hay selección; úsalo para crear contenido, especialmente si el documento está vacío); y {"type":"format","target":"selection"} o {"type":"format","find":"fragmento exacto"}, con "font" que puede incluir bold, italic, color, highlightColor, size o name. Usa máximo 10 operaciones. "find" debe aparecer exactamente en el contexto y tener máximo 240 caracteres. Cada búsqueda se aplicará solo a la primera coincidencia. No inventes fragmentos. Si hay una selección, prioriza cambiarla. Si el documento está vacío y se pide redactar contenido, usa insert_at_cursor con el contenido completo. Para formato usa format; los colores pueden ser CSS sencillos o hexadecimales. Si el cambio no es seguro, devuelve operations vacía y explica el motivo. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
 
 app.use("/api", (req, res, next) => {
   if (req.path === "/health") return next();
@@ -45,7 +45,7 @@ function makeContext(documentText, selectionText) {
 }
 
 function sanitizeEditPlan(value, { hasSelection, context }) {
-  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "format"]);
+  const allowedTypes = new Set(["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format"]);
   const allowedFonts = new Set(["bold", "italic", "color", "highlightColor", "size", "name"]);
   const operations = Array.isArray(value?.operations) ? value.operations.slice(0, 10) : [];
   const clean = operations.flatMap((operation) => {
@@ -56,6 +56,7 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
     const replacement = typeof operation.replacement === "string" ? operation.replacement.slice(0, 12000) : "";
     if (["replace", "insert_after", "insert_before"].includes(type) && !find) return [];
     if (["replace_selection", "insert_at_selection"].includes(type) && (!text || !hasSelection)) return [];
+    if (type === "insert_at_cursor" && (!text || hasSelection)) return [];
     if (type === "replace" && typeof operation.replacement !== "string") return [];
     if (type === "format") {
       if ((operation.target === "selection" && !hasSelection) || (operation.target !== "selection" && !find)) return [];

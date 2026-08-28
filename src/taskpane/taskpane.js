@@ -42,11 +42,12 @@ function applyFont(range, font) {
 async function applyOperation(operation) {
   return Word.run(async (context) => {
     let range;
-    if (operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type)) range = context.document.getSelection();
+    if (operation.target === "selection" || ["replace_selection", "insert_at_selection", "insert_at_cursor"].includes(operation.type)) range = context.document.getSelection();
     else range = await findFirstRange(context, operation.find);
     if (!range) return false;
     if (operation.type === "replace" || operation.type === "replace_selection") range.insertText(operation.replacement ?? operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_after" || operation.type === "insert_at_selection") range.insertText(operation.text, Word.InsertLocation.after);
+    if (operation.type === "insert_at_cursor") range.insertText(operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_before") range.insertText(operation.text, Word.InsertLocation.before);
     if (operation.type === "format") applyFont(range, operation.font);
     await context.sync(); return true;

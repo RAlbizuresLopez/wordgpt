@@ -6,7 +6,7 @@ Complemento de Microsoft Word que lee el documento actual, entiende la selecció
 
 - Panel de edición en español con vista previa y botón explícito para aplicar o descartar cambios.
 - Contexto del documento completo (limitado a 24 000 caracteres) y de la selección activa.
-- Reemplazos e inserciones anclados a fragmentos exactos del documento; cada ancla se aplica solo a la primera coincidencia.
+- Reemplazos e inserciones anclados a fragmentos exactos del documento; cada ancla se aplica solo a la primera coincidencia. En documentos vacíos puede crear el contenido en el cursor.
 - Formato de texto: negrita, cursiva, fuente, tamaño, color y resaltado.
 - Gateway en el Mac mini que llama a Ollama por `localhost`; la laptop de la usuaria no ejecuta modelos ni guarda claves.
 - Acceso privado mediante Tailscale Serve, sin puertos públicos.
