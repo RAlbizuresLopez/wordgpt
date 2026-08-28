@@ -86,13 +86,20 @@ function applyFont(range, font) {
   if (typeof font.name === "string") range.font.name = font.name;
 }
 
-function applyParagraphFormat(target, paragraphFormat) {
+async function applyParagraphFormat(context, target, paragraphFormat) {
   if (!paragraphFormat) return;
-  const format = target.paragraphFormat || target;
-  const alignment = { left: Word.Alignment.left, centered: Word.Alignment.centered, right: Word.Alignment.right, justified: Word.Alignment.justified };
-  if (typeof paragraphFormat.alignment === "string") format.alignment = alignment[paragraphFormat.alignment.toLowerCase()];
-  for (const key of ["leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]) {
-    if (paragraphFormat[key] !== undefined) format[key] = paragraphFormat[key];
+  let targets = [target];
+  if (target.paragraphs) {
+    target.paragraphs.load("items"); await context.sync();
+    targets = target.paragraphs.items;
+  }
+  const alignment = { left: "Left", centered: "Centered", right: "Right", justified: "Justified" };
+  for (const item of targets) {
+    const format = item.paragraphFormat || item;
+    if (typeof paragraphFormat.alignment === "string") format.alignment = alignment[paragraphFormat.alignment.toLowerCase()];
+    for (const key of ["leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"]) {
+      if (paragraphFormat[key] !== undefined) format[key] = paragraphFormat[key];
+    }
   }
 }
 
@@ -113,14 +120,14 @@ async function applyOperation(operation) {
       const paragraph = await paragraphAt(context, operation.paragraph);
       if (!paragraph) return false;
       applyFont(paragraph, operation.font);
-      applyParagraphFormat(paragraph, operation.paragraphFormat);
+      await applyParagraphFormat(context, paragraph, operation.paragraphFormat);
       await context.sync();
       return true;
     }
     if (operation.type === "format_document") {
       const paragraphs = context.document.body.paragraphs;
       paragraphs.load("items"); await context.sync();
-      for (const paragraph of paragraphs.items) { applyFont(paragraph, operation.font); applyParagraphFormat(paragraph, operation.paragraphFormat); }
+      for (const paragraph of paragraphs.items) { applyFont(paragraph, operation.font); await applyParagraphFormat(context, paragraph, operation.paragraphFormat); }
       await context.sync();
       return true;
     }
@@ -132,7 +139,7 @@ async function applyOperation(operation) {
     if (operation.type === "replace" || operation.type === "replace_selection") range.insertText(operation.replacement ?? operation.text, Word.InsertLocation.replace);
     if (operation.type === "insert_after" || operation.type === "insert_at_selection") range.insertText(operation.text, Word.InsertLocation.after);
     if (operation.type === "insert_before") range.insertText(operation.text, Word.InsertLocation.before);
-    if (operation.type === "format") { applyFont(range, operation.font); applyParagraphFormat(range, operation.paragraphFormat); }
+    if (operation.type === "format") { applyFont(range, operation.font); await applyParagraphFormat(context, range, operation.paragraphFormat); }
     await context.sync(); return true;
   });
 }
