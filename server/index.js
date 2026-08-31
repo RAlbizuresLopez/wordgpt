@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
-import { lookup } from "node:dns/promises";
+import https from "node:https";
+import { getHttpsServerOptions } from "office-addin-dev-certs";
+import { runCodexExec } from "./codexProvider.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -8,35 +10,64 @@ const bindHost = process.env.BIND_HOST || "127.0.0.1";
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("dist"));
 
-const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-const ollamaModel = process.env.OLLAMA_MODEL || "qwen3:14b";
-const contextLength = Number(process.env.OLLAMA_CONTEXT_LENGTH || 8192);
-const searxngBaseUrl = (process.env.SEARXNG_BASE_URL || "http://searxng:8080").replace(/\/$/, "");
-const allowedTailscaleLogins = new Set(
-  (process.env.ALLOWED_TAILSCALE_USER_LOGINS || "")
-    .split(",")
-    .map(login => login.trim().toLowerCase())
-    .filter(Boolean)
-);
 const systemInstructions = `Eres un asistente experto integrado en Microsoft Word. Responde en el idioma del usuario. Usa el contexto del documento únicamente para ayudar con su petición. Si propones texto para insertar, entrégalo listo para pegar y no inventes información que no esté sustentada por el documento. No proporciones diagnósticos, tratamientos ni recomendaciones clínicas.`;
-const editInstructions = `Eres el motor de edición de Word. Devuelve ÚNICAMENTE JSON válido: {"summary":"breve","operations":[...]}. Operaciones de texto: replace/find/replacement, insert_before o insert_after/find/text, replace_selection/text, insert_at_selection/text, insert_at_cursor/text para documento vacío. Operaciones de formato: format con target selection o find; format_paragraph con paragraph (1,2,3...); y format_document para todo el documento. Las operaciones de formato aceptan "font" y/o "paragraphFormat". font: bold, italic, underline (none|single|double), strikethrough, color, highlightColor, size, name, allCaps, smallCaps, superscript, subscript. paragraphFormat: alignment (left|centered|right|justified), leftIndent, rightIndent, firstLineIndent, spaceBefore, spaceAfter, lineSpacing, keepTogether, keepWithNext, widowControl. Herramientas estructurales: set_header/text/kind (primary|first_page|even_pages), set_footer/text/kind, insert_table/values (matriz de texto rectangular, máximo 20 filas x 12 columnas, location cursor|document_end), insert_page_break/location (cursor|document_end). set_header y set_footer sustituyen ese encabezado o pie en todas las secciones. Usa format_document para el formato base del resto del documento y ponlo ANTES de una selección especial, para que la selección la sobrescriba. Usa format_paragraph para "segundo párrafo". Máximo 10 operaciones. find debe aparecer exactamente en el contexto y medir máximo 240 caracteres. Si hay selección, priorízala. No inventes fragmentos. No hagas diagnósticos, tratamientos ni recomendaciones clínicas.`;
-
-app.use("/api", (req, res, next) => {
-  if (req.path === "/health") return next();
-  if (!allowedTailscaleLogins.size) return next();
-  const requester = req.get("Tailscale-User-Login")?.toLowerCase();
-  if (requester && allowedTailscaleLogins.has(requester)) return next();
-  res.status(403).json({ error: "Este usuario de Tailscale no tiene acceso al asistente." });
-});
+const editInstructions = `Eres el asistente de Word integrado en un panel de chat: el campo "summary" es tu respuesta al usuario y se muestra tal cual, así que contéstale ahí de forma completa y natural (como lo haría ChatGPT), no la resumas ni la recortes. Devuelve ÚNICAMENTE JSON válido: {"summary":"tu respuesta completa","operations":[...]}. Si el usuario solo pregunta o pide una opinión/análisis (nada que cambie el documento), responde completo en "summary" y deja "operations" vacío. Si pide agregar, escribir, generar o redactar contenido en el documento, SIEMPRE debes incluir la operación de inserción correspondiente con el texto completo (insert_at_cursor si el documento está vacío, insert_after/insert_before/replace usando un "find" del contexto como referencia, o replace_selection/insert_at_selection si hay selección) — no basta con describir o mostrar ese texto solo en "summary", tiene que quedar también en una operación para que se inserte de verdad en el documento. Operaciones de texto: replace/find/replacement, insert_before o insert_after/find/text, replace_selection/text, insert_at_selection/text, insert_at_cursor/text para documento vacío. Operaciones de formato: format con target selection o find; format_paragraph con paragraph (1,2,3...); y format_document para todo el documento. Las operaciones de formato aceptan "font" y/o "paragraphFormat". font: bold, italic, underline (none|single|double), strikethrough, color, highlightColor, size, name, allCaps, smallCaps, superscript, subscript. paragraphFormat: alignment (left|centered|right|justified), leftIndent, rightIndent, firstLineIndent, spaceBefore, spaceAfter, lineSpacing, keepTogether, keepWithNext, widowControl. Herramientas estructurales: set_header/text/kind (primary|first_page|even_pages), set_footer/text/kind, insert_table/values (matriz de texto rectangular, máximo 20 filas x 12 columnas, location cursor|document_end), insert_page_break/location (cursor|document_end). set_header y set_footer sustituyen ese encabezado o pie en todas las secciones. Usa format_document para el formato base del resto del documento y ponlo ANTES de una selección especial, para que la selección la sobrescriba. Usa format_paragraph para "segundo párrafo". Máximo 10 operaciones. find debe aparecer exactamente en el contexto y medir máximo 240 caracteres. Si hay selección, priorízala. No inventes fragmentos que no pediste generar. No hagas diagnósticos, tratamientos ni recomendaciones clínicas. Tú decides qué operaciones usar: aplica tú mismo cada cambio de formato o estilo que se te pida, con los valores correctos, sin dejar nada implícito para que otro sistema lo adivine.`;
+// Codex exige el modo "strict" de OpenAI para --output-schema: additionalProperties:false en
+// cada objeto anidado, y TODAS las propiedades listadas en required (los campos opcionales se
+// expresan como ["tipo","null"], no como ausentes). sanitizeEditPlan ya trata null como ausente.
+const editPlanSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    operations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["replace", "insert_after", "insert_before", "replace_selection", "insert_at_selection", "insert_at_cursor", "format", "format_paragraph", "format_document", "set_header", "set_footer", "insert_table", "insert_page_break"]
+          },
+          find: { type: ["string", "null"] },
+          replacement: { type: ["string", "null"] },
+          text: { type: ["string", "null"] },
+          target: { type: ["string", "null"] },
+          paragraph: { type: ["integer", "null"] },
+          location: { type: ["string", "null"] },
+          kind: { type: ["string", "null"] },
+          values: { type: ["array", "null"], items: { type: "array", items: { type: "string" } } },
+          font: {
+            type: ["object", "null"],
+            properties: {
+              bold: { type: ["boolean", "null"] }, italic: { type: ["boolean", "null"] }, underline: { type: ["string", "null"] }, strikethrough: { type: ["boolean", "null"] },
+              color: { type: ["string", "null"] }, highlightColor: { type: ["string", "null"] }, size: { type: ["number", "null"] }, name: { type: ["string", "null"] },
+              allCaps: { type: ["boolean", "null"] }, smallCaps: { type: ["boolean", "null"] }, superscript: { type: ["boolean", "null"] }, subscript: { type: ["boolean", "null"] }
+            },
+            required: ["bold", "italic", "underline", "strikethrough", "color", "highlightColor", "size", "name", "allCaps", "smallCaps", "superscript", "subscript"],
+            additionalProperties: false
+          },
+          paragraphFormat: {
+            type: ["object", "null"],
+            properties: {
+              alignment: { type: ["string", "null"] }, leftIndent: { type: ["number", "null"] }, rightIndent: { type: ["number", "null"] }, firstLineIndent: { type: ["number", "null"] },
+              spaceBefore: { type: ["number", "null"] }, spaceAfter: { type: ["number", "null"] }, lineSpacing: { type: ["number", "null"] },
+              keepTogether: { type: ["boolean", "null"] }, keepWithNext: { type: ["boolean", "null"] }, widowControl: { type: ["boolean", "null"] }
+            },
+            required: ["alignment", "leftIndent", "rightIndent", "firstLineIndent", "spaceBefore", "spaceAfter", "lineSpacing", "keepTogether", "keepWithNext", "widowControl"],
+            additionalProperties: false
+          }
+        },
+        required: ["type", "find", "replacement", "text", "target", "paragraph", "location", "kind", "values", "font", "paragraphFormat"],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ["summary", "operations"],
+  additionalProperties: false
+};
 
 app.get("/api/health", async (_req, res) => {
-  try {
-    const response = await fetch(`${ollamaBaseUrl}/api/tags`);
-    if (!response.ok) throw new Error(`Ollama respondió ${response.status}`);
-    res.json({ ok: true, model: ollamaModel });
-  } catch {
-    res.status(503).json({ ok: false, error: "Ollama no está disponible en el Mac mini." });
-  }
+  res.json({ ok: true, provider: "codex" });
 });
 
 function makeContext(documentText, selectionText) {
@@ -46,32 +77,19 @@ function makeContext(documentText, selectionText) {
   ].filter(Boolean).join("\n\n");
 }
 
-const privateIp = (address) => /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address) || address === "::1" || address.startsWith("fc") || address.startsWith("fd") || address.startsWith("fe80:");
-async function assertPublicHttps(url) {
-  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) throw new Error("Solo se pueden consultar páginas HTTPS públicas.");
-  const addresses = await lookup(url.hostname, { all: true });
-  if (!addresses.length || addresses.some(({ address }) => privateIp(address))) throw new Error("La URL no apunta a una dirección pública.");
-}
-function htmlToText(value) { return value.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/\s+/g, " ").trim(); }
-async function readPublicPage(rawUrl) {
-  let url = new URL(rawUrl);
-  for (let redirects = 0; redirects < 4; redirects += 1) {
-    await assertPublicHttps(url);
-    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "WordGPT-Research/1.0" } });
-    if ([301, 302, 303, 307, 308].includes(response.status)) { url = new URL(response.headers.get("location"), url); continue; }
-    if (!response.ok) throw new Error(`La página respondió ${response.status}.`);
-    if (!/text\/(html|plain)/i.test(response.headers.get("content-type") || "")) throw new Error("La URL no contiene texto web.");
-    const reader = response.body.getReader(); let bytes = 0, value = "";
-    while (bytes < 180000) { const { done, value: chunk } = await reader.read(); if (done) break; bytes += chunk.byteLength; value += new TextDecoder().decode(chunk, { stream: true }); }
-    reader.cancel().catch(() => {}); return htmlToText(value).slice(0, 12000);
+function flattenMessages(messages) {
+  const [system, ...rest] = messages;
+  const history = rest.slice(0, -1);
+  const last = rest[rest.length - 1];
+  const sections = [
+    "No ejecutes comandos de shell ni edites archivos; responde solo con el texto/JSON pedido usando el contexto de abajo.",
+    `[INSTRUCCIONES DEL SISTEMA]\n${system.content}`
+  ];
+  if (history.length) {
+    sections.push(`[HISTORIAL RECIENTE]\n${history.map(({ role, content }) => `${role === "user" ? "Usuario" : "Asistente"}: ${content}`).join("\n")}`);
   }
-  throw new Error("Demasiadas redirecciones.");
-}
-async function searchWeb(query) {
-  const response = await fetch(`${searxngBaseUrl}/search?${new URLSearchParams({ q: query, format: "json", language: "es-ES", safesearch: "1" })}`, { signal: AbortSignal.timeout(12000) });
-  if (!response.ok) throw new Error("El servicio de búsqueda no está disponible.");
-  const data = await response.json();
-  return (data.results || []).filter(({ url }) => typeof url === "string" && url.startsWith("https://")).slice(0, 4).map(({ title, url, content }) => ({ title: String(title || "Fuente"), url, content: String(content || "") }));
+  sections.push(`[PETICIÓN ACTUAL]\n${last.content}`);
+  return sections.join("\n\n");
 }
 
 function sanitizeEditPlan(value, { hasSelection, context }) {
@@ -134,7 +152,7 @@ function sanitizeEditPlan(value, { hasSelection, context }) {
     if (find && !context.includes(find)) return [];
     return [{ type, ...(find ? { find } : {}), ...(type === "replace" ? { replacement } : { text }) }];
   });
-  return { summary: typeof value?.summary === "string" ? value.summary.slice(0, 500) : "Plan de edición preparado.", operations: clean };
+  return { summary: typeof value?.summary === "string" ? value.summary.slice(0, 8000) : "Plan de edición preparado.", operations: clean };
 }
 
 function fallbackParagraphFormat(message) {
@@ -196,7 +214,7 @@ function fallbackSelectionAndDocumentFormat(message, hasSelection) {
 function fallbackStructuralOperation(message) {
   const normalized = message.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
   const location = /\b(final|terminar|ultimo)\b/.test(normalized) ? "document_end" : "cursor";
-  if (/\btabla\b/.test(normalized)) {
+  if (/\btabla\b/.test(normalized) && !/tabla de conten/.test(normalized)) {
     const columnsMatch = message.match(/columnas?\s+(.+?)(?:,?\s+con\s+(?:\d+|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+filas?|\.|$)/i);
     const columns = (columnsMatch?.[1] || "Columna 1, Columna 2")
       .split(/\s*,\s*|\s+y\s+/i).map((cell) => cell.trim()).filter(Boolean).slice(0, 12);
@@ -221,28 +239,14 @@ app.post("/api/chat", async (req, res) => {
   const prior = Array.isArray(history) ? history.slice(-8).map(({ role, content }) => ({ role, content: String(content).slice(0, 6000) })) : [];
 
   try {
-    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: ollamaModel,
-        stream: false,
-        think: false,
-        keep_alive: "2m",
-        options: { num_ctx: contextLength, temperature: 0.3 },
-        messages: [
-          { role: "system", content: systemInstructions },
-          ...prior,
-          { role: "user", content: `${context ? `${context}\n\n` : ""}PETICIÓN DEL USUARIO:\n${message.trim()}` }
-        ]
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data?.error || "No se pudo contactar Ollama." });
-    const answer = data.message?.content || "No se recibió texto.";
+    const answer = await runCodexExec(flattenMessages([
+      { role: "system", content: systemInstructions },
+      ...prior,
+      { role: "user", content: `${context ? `${context}\n\n` : ""}PETICIÓN DEL USUARIO:\n${message.trim()}` }
+    ]));
     res.json({ answer });
   } catch (error) {
-    res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message });
+    res.status(502).json({ error: error.message || "No se pudo obtener respuesta de Codex." });
   }
 });
 
@@ -251,65 +255,57 @@ app.post("/api/edit", async (req, res) => {
   if (typeof message !== "string" || !message.trim()) return res.status(400).json({ error: "Describe el cambio que quieres hacer." });
   const context = makeContext(documentText, selectionText);
   const prior = Array.isArray(history) ? history.slice(-4).map(({ role, content }) => ({ role, content: String(content).slice(0, 3000) })) : [];
+  const baseMessages = [
+    { role: "system", content: editInstructions }, ...prior,
+    { role: "user", content: `${context ? `${context}\n\n` : ""}CAMBIO SOLICITADO:\n${message.trim()}` }
+  ];
+  async function requestPlan(messages) {
+    const text = await runCodexExec(flattenMessages(messages), { schema: editPlanSchema });
+    return JSON.parse(text);
+  }
   try {
-    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, format: "json", keep_alive: "2m", options: { num_ctx: contextLength, temperature: 0.1 }, messages: [
-        { role: "system", content: editInstructions }, ...prior,
-        { role: "user", content: `${context ? `${context}\n\n` : ""}CAMBIO SOLICITADO:\n${message.trim()}` }
-      ] })
-    });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data?.error || "No se pudo contactar Ollama." });
     let plan;
-    try { plan = JSON.parse(data.message?.content || ""); }
-    catch { return res.status(502).json({ error: "El modelo no devolvió un plan de edición válido. Inténtalo de nuevo." }); }
+    try { plan = await requestPlan(baseMessages); }
+    catch {
+      // Codex no devolvió JSON válido pese al esquema; le damos una segunda oportunidad
+      // en vez de degradar directo a los heurísticos de texto.
+      try {
+        plan = await requestPlan([...baseMessages, { role: "user", content: "Tu respuesta anterior no era JSON válido. Devuelve SOLO el JSON del plan siguiendo el esquema, sin texto adicional." }]);
+      } catch {
+        return res.status(502).json({ error: "Codex no devolvió un plan de edición válido. Inténtalo de nuevo." });
+      }
+    }
     const safePlan = sanitizeEditPlan(plan, { hasSelection: Boolean(selectionText.trim()), context });
     const structuralFallback = fallbackStructuralOperation(message);
     const requestedFallback = fallbackSelectionAndDocumentFormat(message, Boolean(selectionText.trim()));
     if (structuralFallback) {
-      // Las estructuras de Word no deben degradarse a búsquedas de texto generadas por el modelo.
-      safePlan.operations = [structuralFallback];
-    } else if (!safePlan.operations.length) {
+      // Las estructuras de Word (tabla/encabezado/pie/salto) no deben degradarse a búsquedas de
+      // texto generadas por el modelo, pero el resto del plan (p. ej. formato pedido en la misma
+      // instrucción) sí es responsabilidad del modelo y no debe descartarse.
+      const structuralTypes = new Set(["insert_table", "set_header", "set_footer", "insert_page_break"]);
+      safePlan.operations = safePlan.operations.filter((operation) => !structuralTypes.has(operation.type));
+      safePlan.operations.push(structuralFallback);
+    }
+    if (!safePlan.operations.length) {
       const fallback = fallbackParagraphFormat(message);
       safePlan.operations = fallback ? [fallback] : requestedFallback;
-    } else if (requestedFallback.length) {
-      for (const requested of requestedFallback) {
-        const existing = safePlan.operations.find((operation) => operation.type === requested.type && (requested.type !== "format" || operation.target === requested.target));
-        if (existing) {
-          existing.font = { ...existing.font, ...requested.font };
-          existing.paragraphFormat = { ...existing.paragraphFormat, ...requested.paragraphFormat };
-        } else if (requested.type === "format_document") safePlan.operations.unshift(requested);
-        else safePlan.operations.push(requested);
-      }
-      safePlan.operations = safePlan.operations.slice(0, 10);
     }
+    // Si Codex ya produjo operaciones válidas, son definitivas: no se le agregan ni fusionan
+    // adivinanzas de regex encima. Los heurísticos de arriba son solo una red de seguridad para
+    // cuando el modelo no devolvió nada aplicable, no un "segundo opinión" sobre un plan ya bueno.
     console.info("Word GPT edit plan", safePlan.operations.map(({ type, location, kind }) => ({ type, location, kind })));
     res.json(safePlan);
-  } catch (error) { res.status(502).json({ error: "No se pudo conectar a Ollama en el Mac mini.", detail: error.message }); }
+  } catch (error) { res.status(502).json({ error: error.message || "No se pudo obtener un plan de edición de Codex." }); }
 });
 
-app.post("/api/research", async (req, res) => {
-  const { message, documentText = "", selectionText = "" } = req.body || {};
-  if (typeof message !== "string" || !message.trim()) return res.status(400).json({ error: "Escribe qué deseas investigar." });
-  try {
-    const results = await searchWeb(message.trim());
-    if (!results.length) return res.status(404).json({ error: "No encontré fuentes públicas para esa consulta." });
-    const researched = await Promise.all(results.slice(0, 3).map(async (result) => ({ ...result, text: await readPublicPage(result.url).catch(() => result.content) })));
-    const sources = researched.map(({ title, url }) => ({ title, url }));
-    const context = makeContext(documentText, selectionText);
-    const sourceText = researched.map((source, index) => `[${index + 1}] ${source.title}\n${source.url}\n${source.text}`).join("\n\n");
-    const response = await fetch(`${ollamaBaseUrl}/api/chat`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: ollamaModel, stream: false, think: false, keep_alive: "2m", options: { num_ctx: contextLength, temperature: 0.2 }, messages: [
-        { role: "system", content: "Responde en español usando solo las fuentes proporcionadas. Incluye referencias [1], [2] junto a cada afirmación relevante. No inventes datos ni hagas diagnósticos, tratamientos o recomendaciones clínicas." },
-        { role: "user", content: `${context ? `${context}\n\n` : ""}CONSULTA:\n${message.trim()}\n\nFUENTES:\n${sourceText}` }
-      ] })
-    });
-    const data = await response.json();
-    if (!response.ok) return res.status(response.status).json({ error: data?.error || "Ollama no pudo analizar las fuentes." });
-    res.json({ answer: data.message?.content || "No se recibió respuesta.", sources });
-  } catch (error) { res.status(502).json({ error: error.message || "No se pudo completar la investigación web." }); }
-});
-
-app.listen(port, bindHost, () => console.log(`Gateway local listo en http://${bindHost}:${port} (Ollama: ${ollamaModel})`));
+// El manifiesto siempre carga el panel por HTTPS. En "start" (uso diario, sin Vite) este mismo
+// proceso sirve el panel directo, así que necesita el certificado local de confianza
+// (`pnpm run certs`). En dev, Vite ya sirve el panel por HTTPS y solo llama a este proceso por
+// HTTP interno para la API, así que no hace falta duplicar el certificado aquí.
+const useHttps = process.env.HTTPS === "1" || process.env.HTTPS === "true";
+if (useHttps) {
+  const httpsOptions = await getHttpsServerOptions();
+  https.createServer(httpsOptions, app).listen(port, bindHost, () => console.log(`Word GPT listo en https://${bindHost}:${port} (motor: Codex)`));
+} else {
+  app.listen(port, bindHost, () => console.log(`Word GPT listo en http://${bindHost}:${port} (motor: Codex)`));
+}

@@ -1,6 +1,6 @@
 const ui = {
   messages: document.querySelector("#messages"), prompt: document.querySelector("#prompt"), form: document.querySelector("#chat-form"), send: document.querySelector("#send"),
-  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme"), webResearch: document.querySelector("#web-research")
+  settings: document.querySelector("#settings"), config: document.querySelector("#config"), refresh: document.querySelector("#refresh-context"), context: document.querySelector("#context-label"), actions: document.querySelector("#actions"), apply: document.querySelector("#apply"), discard: document.querySelector("#discard"), selectionContext: document.querySelector("#selection-context"), selectionPreview: document.querySelector("#selection-preview"), selectionState: document.querySelector("#selection-state"), toggleSelection: document.querySelector("#toggle-selection"), panelColor: document.querySelector("#panel-color"), accentColor: document.querySelector("#accent-color"), surfaceColor: document.querySelector("#surface-color"), textColor: document.querySelector("#text-color"), mutedColor: document.querySelector("#muted-color"), borderColor: document.querySelector("#border-color"), resetTheme: document.querySelector("#reset-theme")
 };
 let documentText = "", selectionText = "", activeSelectionText = "", includeSelection = true, selectionAnchorId = null, pendingPlan = null, history = [];
 
@@ -14,14 +14,9 @@ Office.onReady((info) => {
 
 function show(content, type = "assistant") { const message = document.createElement("article"); message.className = type; message.textContent = content; ui.messages.append(message); ui.messages.scrollTop = ui.messages.scrollHeight; return message; }
 function trim(text, limit = 24000) { return text.length > limit ? `${text.slice(0, limit)}\n\n[El resto del documento no se envió por longitud.]` : text; }
-function planDescription(plan) { return `${plan.summary}\n\n${plan.operations.length} cambio${plan.operations.length === 1 ? "" : "s"} listo${plan.operations.length === 1 ? "" : "s"} para aplicar.`; }
-function showResearchResult(message, data) {
-  message.textContent = data.answer;
-  if (!data.sources?.length) return;
-  const title = document.createElement("strong"); title.textContent = "\n\nFuentes"; message.append(title);
-  const list = document.createElement("ul");
-  data.sources.forEach(({ title: sourceTitle, url }) => { const item = document.createElement("li"); const link = document.createElement("a"); link.href = url; link.target = "_blank"; link.rel = "noreferrer"; link.textContent = sourceTitle; item.append(link); list.append(item); });
-  message.append(list);
+function planDescription(plan) {
+  if (!plan.operations.length) return plan.summary;
+  return `${plan.summary}\n\n${plan.operations.length} cambio${plan.operations.length === 1 ? "" : "s"} listo${plan.operations.length === 1 ? "" : "s"} para aplicar.`;
 }
 
 function renderSelectionContext() {
@@ -206,18 +201,28 @@ async function removeSelectionAnchor() {
 async function applyPlan() {
   if (!pendingPlan) return;
   ui.apply.disabled = true; ui.discard.disabled = true;
-  const status = show("Aplicando cambios…"); let applied = 0, skipped = 0;
-  try {
-    const orderedOperations = [...pendingPlan.operations].sort((a, b) => (b.type === "format_document") - (a.type === "format_document"));
-    for (const operation of orderedOperations) {
+  const status = show("Aplicando cambios…"); let applied = 0, skipped = 0, failed = 0;
+  const orderedOperations = [...pendingPlan.operations].sort((a, b) => (b.type === "format_document") - (a.type === "format_document"));
+  // Cada operación se intenta de forma independiente: si una falla (p. ej. un error de Word al
+  // buscar texto), las demás igual se aplican. El plan siempre se descarta al terminar, para no
+  // reintentar y duplicar cambios que ya se aplicaron parcialmente.
+  for (const operation of orderedOperations) {
+    try {
       if (await applyOperation(operation)) applied += 1;
       else skipped += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("No se pudo aplicar una operación", operation.type, error);
     }
-    status.textContent = `Cambios aplicados: ${applied}.${skipped ? ` No encontré ${skipped} fragmento${skipped === 1 ? "" : "s"}; no se modificaron.` : ""}`;
-    pendingPlan = null; ui.actions.classList.add("hidden"); await removeSelectionAnchor(); await refreshContext();
-  } catch (error) {
-    status.className = "error"; status.textContent = `No se pudieron aplicar todos los cambios: ${error.message || "error de Word"}.`;
-  } finally { ui.apply.disabled = false; ui.discard.disabled = false; }
+  }
+  const parts = [`Cambios aplicados: ${applied}.`];
+  if (skipped) parts.push(`No encontré ${skipped} fragmento${skipped === 1 ? "" : "s"}; no se modificaron.`);
+  if (failed) parts.push(`${failed} cambio${failed === 1 ? "" : "s"} fallaron por un error de Word.`);
+  status.className = failed ? "error" : "assistant";
+  status.textContent = parts.join(" ");
+  pendingPlan = null; ui.actions.classList.add("hidden");
+  await removeSelectionAnchor(); await refreshContext();
+  ui.apply.disabled = false; ui.discard.disabled = false;
 }
 
 ui.settings.onclick = () => ui.config.classList.toggle("hidden");
@@ -249,11 +254,10 @@ async function anchorAndDeselectAfterSend() {
 }
 ui.form.onsubmit = async (event) => {
   event.preventDefault(); const message = ui.prompt.value.trim(); if (!message) return;
-  await refreshContext(); const selectionForRequest = selectionText; const useWebResearch = ui.webResearch.checked; await anchorAndDeselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show(useWebResearch ? "Buscando fuentes públicas…" : "Preparando cambios…");
+  await refreshContext(); const selectionForRequest = selectionText; await anchorAndDeselectAfterSend(); show(message, "user"); ui.prompt.value = ""; ui.send.disabled = true; const pending = show("Preparando cambios…");
   try {
-    const response = await fetch(useWebResearch ? "/api/research" : "/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
+    const response = await fetch("/api/edit", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ message, documentText, selectionText: selectionForRequest, history }) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error || "Error inesperado.");
-    if (useWebResearch) { await removeSelectionAnchor(); showResearchResult(pending, data); history = [...history, { role:"user", content:message }, { role:"assistant", content:data.answer }].slice(-8); return; }
     if (selectionAnchorId) data.operations = data.operations.map((operation) => operation.target === "selection" || ["replace_selection", "insert_at_selection"].includes(operation.type) ? { ...operation, anchorId: selectionAnchorId } : operation);
     pendingPlan = data; pending.textContent = planDescription(data);
     if (data.operations.length) ui.actions.classList.remove("hidden");

@@ -8,13 +8,13 @@
   <DefaultLocale>es-ES</DefaultLocale>
   <DisplayName DefaultValue="Word GPT" />
   <Description DefaultValue="Chat con IA que entiende y edita tu documento de Word." />
-  <IconUrl DefaultValue="https://macmini4pro.tail97c777.ts.net/icon.svg.png" />
-  <HighResolutionIconUrl DefaultValue="https://macmini4pro.tail97c777.ts.net/icon.svg.png" />
-  <SupportUrl DefaultValue="https://macmini4pro.tail97c777.ts.net" />
+  <IconUrl DefaultValue="https://localhost:3000/icon.svg.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/icon.svg.png" />
+  <SupportUrl DefaultValue="https://localhost:3000" />
   <Hosts><Host Name="Document" /></Hosts>
   <Requirements><Sets DefaultMinVersion="1.5"><Set Name="WordApi" /></Sets></Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://macmini4pro.tail97c777.ts.net/taskpane.html" />
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>

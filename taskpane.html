@@ -11,7 +11,7 @@
     <main class="app">
       <header><span class="mark">✦</span><div><strong>Word GPT</strong><small>Asistente del documento</small></div><button id="settings" title="Configuración">⚙</button></header>
       <section id="config" class="config hidden">
-        <p>Este asistente utiliza un modelo local en el Mac mini. El documento no se envía a OpenAI ni a Anthropic.</p>
+        <p>Este asistente usa Codex con tu propia sesión de ChatGPT. Tu documento se envía a OpenAI para generar cada respuesta.</p>
         <div class="theme-controls">
           <label>Fondo del panel <input id="panel-color" type="color" value="#17171c" /></label>
           <label>Color de acento <input id="accent-color" type="color" value="#7456d8" /></label>
@@ -35,7 +35,7 @@
         <button id="toggle-selection" type="button">Quitar del contexto</button>
         <pre id="selection-preview"></pre>
       </section>
-      <form id="chat-form"><div class="composer"><textarea id="prompt" rows="3" placeholder="Ej.: Haz más claro el segundo párrafo y resalta las conclusiones."></textarea><label class="research-toggle"><input id="web-research" type="checkbox" /> Buscar en Internet (solo se envía esta consulta)</label><small class="shortcut">Ctrl + Enter o ⌘ + Enter para enviar</small></div><button id="send" type="submit">Editar</button></form>
+      <form id="chat-form"><div class="composer"><textarea id="prompt" rows="3" placeholder="Ej.: Haz más claro el segundo párrafo y resalta las conclusiones."></textarea><small class="shortcut">Ctrl + Enter o ⌘ + Enter para enviar</small></div><button id="send" type="submit">Editar</button></form>
     </main>
     <script type="module" src="/src/taskpane/taskpane.js"></script>
   </body>
